@@ -39,6 +39,8 @@
     "https://*.claude.ai/*",
     "https://gemini.google.com/*",
     "https://notebooklm.google.com/*",
+    "https://perplexity.ai/*",
+    "https://*.perplexity.ai/*",
     "https://keep.google.com/*"
   ],
   "background": {
@@ -49,6 +51,23 @@
     "default_path": "src/sidepanel/index.html"
   },
   "options_page": "src/options/index.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://*.chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://*.claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://notebooklm.google.com/*",
+        "https://perplexity.ai/*",
+        "https://*.perplexity.ai/*"
+      ],
+      "js": ["dist/content/aiInputAgent.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
   "commands": {
     "_execute_action": {
       "suggested_key": {

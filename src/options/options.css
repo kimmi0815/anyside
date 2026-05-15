@@ -93,12 +93,14 @@ p {
 
 input,
 select,
+textarea,
 button {
   font: inherit;
 }
 
 input,
-select {
+select,
+textarea {
   height: 36px;
   min-width: 0;
   border: 1px solid var(--line);
@@ -117,11 +119,36 @@ select {
   width: min(100%, 460px);
 }
 
+textarea {
+  min-height: 148px;
+  height: auto;
+  resize: vertical;
+  padding: 10px;
+  line-height: 1.45;
+}
+
 .custom-form {
   display: grid;
   grid-template-columns: minmax(140px, 220px) minmax(220px, 1fr) auto;
   gap: 12px;
   align-items: end;
+}
+
+.prompt-form {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(130px, 180px) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.prompt-body-field {
+  grid-column: 1 / -1;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .button {
@@ -156,7 +183,8 @@ select {
 
 button:focus-visible,
 select:focus-visible,
-input:focus-visible {
+input:focus-visible,
+textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -177,7 +205,8 @@ input:focus-visible {
   background: var(--surface-subtle);
 }
 
-.url-list {
+.url-list,
+.prompt-template-list {
   display: grid;
   gap: 8px;
   margin-top: 14px;
@@ -196,7 +225,8 @@ input:focus-visible {
   color: var(--text);
 }
 
-.url-row {
+.url-row,
+.prompt-template-row {
   display: grid;
   grid-template-columns: minmax(120px, 170px) minmax(0, 1fr) auto;
   gap: 10px;
@@ -207,6 +237,10 @@ input:focus-visible {
   background: var(--surface);
 }
 
+.prompt-template-row {
+  grid-template-columns: minmax(140px, 220px) minmax(90px, 140px) minmax(0, 1fr) auto;
+}
+
 .url-row-editing {
   grid-template-columns: minmax(140px, 220px) minmax(220px, 1fr) auto;
   align-items: end;
@@ -214,19 +248,23 @@ input:focus-visible {
 }
 
 .url-row strong,
-.url-row span {
+.url-row span,
+.prompt-template-row strong,
+.prompt-template-row span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.url-row strong {
+.url-row strong,
+.prompt-template-row strong {
   color: var(--text);
   font-size: 13px;
 }
 
-.url-row span {
+.url-row span,
+.prompt-template-row span {
   color: var(--text-muted);
   font-size: 13px;
 }
@@ -315,10 +353,16 @@ input:focus-visible {
   }
 
   .custom-form,
+  .prompt-form,
   .url-row,
-  .url-row-editing {
+  .url-row-editing,
+  .prompt-template-row {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+
+  .prompt-body-field {
+    grid-column: auto;
   }
 
   .footer-actions {
@@ -382,8 +426,10 @@ input:focus-visible {
   .option-card,
   input,
   select,
+  textarea,
   .button,
   .url-row,
+  .prompt-template-row,
   .empty-state {
     box-shadow: none;
   }

@@ -67,7 +67,7 @@ body {
 .app {
   display: grid;
   position: relative;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   min-width: 320px;
   background: var(--bg);
 }
@@ -89,6 +89,10 @@ body {
 
 .frame-shell {
   grid-row: 2;
+}
+
+.composer-toolbar {
+  grid-row: 4;
 }
 
 .diagnostics {
@@ -205,7 +209,7 @@ button {
   background: var(--surface-subtle);
   color: var(--text);
   box-shadow: inset 0 0 0 0.5px rgba(60, 60, 67, 0.08);
-  cursor: default;
+  cursor: text;
   font-size: 13px;
   font-weight: 500;
   overflow: hidden;
@@ -308,6 +312,230 @@ iframe {
   height: 100%;
   border: 0;
   background: #ffffff;
+}
+
+.composer-toolbar {
+  position: relative;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  min-height: 54px;
+  border-top: 1px solid var(--line);
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.08);
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  backdrop-filter: blur(18px) saturate(1.35);
+}
+
+.composer-toolbar[data-expanded="false"] {
+  min-height: 54px;
+}
+
+.composer-toolbar:hover,
+.composer-toolbar:focus-within {
+  border-color: var(--line-strong);
+  background: var(--surface-glass);
+}
+
+.composer-launcher-button,
+.composer-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.composer-launcher-button {
+  display: none;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+}
+
+.composer-toolbar[data-expanded="false"] .composer-actions {
+  display: flex;
+}
+
+.composer-toolbar[data-expanded="true"] .composer-launcher-button {
+  background: var(--accent-soft);
+}
+
+.composer-launcher-button:hover,
+.composer-launcher-button:focus-visible,
+.composer-button:hover,
+.composer-button:focus-visible,
+.composer-button[aria-expanded="true"] {
+  background: var(--surface-subtle);
+}
+
+.composer-button-icon {
+  display: inline-grid;
+  width: 16px;
+  place-items: center;
+  color: var(--accent);
+  font-weight: 750;
+}
+
+.composer-popover {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 6;
+  width: min(320px, calc(100% - 24px));
+  max-height: min(430px, calc(100% - 24px));
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 8px;
+  background: var(--surface-glass);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  backdrop-filter: blur(22px) saturate(1.45);
+}
+
+.composer-popover[hidden] {
+  display: none;
+}
+
+.prompt-palette {
+  right: 12px;
+  width: min(360px, calc(100% - 24px));
+}
+
+.composer-popover-hint {
+  margin: 0 0 6px;
+  padding: 4px 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.composer-menu,
+.prompt-list {
+  display: grid;
+  gap: 2px;
+}
+
+.composer-menu button,
+.prompt-row {
+  display: grid;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.composer-menu button {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.composer-menu button:hover,
+.composer-menu button:focus-visible,
+.prompt-row:hover,
+.prompt-row:focus-visible,
+.prompt-row[aria-selected="true"] {
+  background: var(--surface-subtle);
+}
+
+.composer-menu button:disabled {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.composer-menu button[data-disabled="true"] {
+  color: var(--text-tertiary);
+}
+
+.prompt-search {
+  width: 100%;
+  height: 34px;
+  margin-bottom: 7px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 10px;
+  background: var(--surface-solid);
+  color: var(--text);
+  font-size: 13px;
+  text-transform: none;
+}
+
+.prompt-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.prompt-row-meta {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.composer-empty {
+  padding: 18px 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.composer-toast {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  z-index: 7;
+  max-width: min(340px, calc(100% - 28px));
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: var(--surface-glass);
+  color: var(--text);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.3;
+  -webkit-backdrop-filter: blur(20px) saturate(1.45);
+  backdrop-filter: blur(20px) saturate(1.45);
+}
+
+.composer-toast[hidden] {
+  display: none;
 }
 
 .fallback {
@@ -474,6 +702,37 @@ th {
   .button {
     padding-inline: 8px;
   }
+
+  .composer-toolbar {
+    justify-content: flex-start;
+    padding-inline: 8px;
+  }
+
+  .composer-button {
+    width: 36px;
+    padding: 0;
+  }
+
+  .composer-button-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .composer-popover {
+    right: 8px;
+    bottom: 8px;
+    width: calc(100% - 16px);
+  }
+
+  .composer-toast {
+    right: 8px;
+    bottom: 8px;
+    max-width: calc(100% - 16px);
+  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -531,5 +790,15 @@ th {
 
   .status-banner[data-tone="diagnostic"] {
     background: rgba(29, 29, 31, 0.92);
+  }
+
+  .composer-toolbar {
+    background: rgba(29, 29, 31, 0.66);
+    box-shadow: 0 -14px 34px rgba(0, 0, 0, 0.34);
+  }
+
+  .composer-toolbar:hover,
+  .composer-toolbar:focus-within {
+    background: var(--surface-glass);
   }
 }

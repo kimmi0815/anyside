@@ -1,6 +1,15 @@
 import { Messages } from "../shared/messages.js";
 import { BUILT_IN_PRESETS, CUSTOM_PRESET_ID, DEFAULT_PRESET_ID, makeCustomPresetId } from "../shared/presets.js";
 import { defaultSettings, getSettings, normalizeSettings, saveSettings, SETTINGS_KEY } from "../shared/storage.js";
+import {
+  CUSTOM_PROMPT_TEMPLATES_KEY,
+  addCustomPromptTemplate,
+  deleteCustomPromptTemplate,
+  getCustomPromptTemplates,
+  normalizeCustomPromptTemplates,
+  updateCustomPromptTemplate
+} from "../storage/promptTemplateStorage.js";
+import type { PromptTemplate } from "../features/composer/types.js";
 import type { ActivePresetId, CustomUrl, RuntimeMessage, RuntimeResponse, Settings } from "../shared/types.js";
 import { labelFromUrl, normalizeUserUrl } from "../shared/url.js";
 
@@ -9,18 +18,29 @@ const customUrlForm = element<HTMLFormElement>("customUrlForm");
 const customLabelInput = element<HTMLInputElement>("customLabelInput");
 const customUrlInput = element<HTMLInputElement>("customUrlInput");
 const customUrlList = element<HTMLElement>("customUrlList");
+const promptTemplateForm = element<HTMLFormElement>("promptTemplateForm");
+const promptTitleInput = element<HTMLInputElement>("promptTitleInput");
+const promptCategoryInput = element<HTMLInputElement>("promptCategoryInput");
+const promptBodyInput = element<HTMLTextAreaElement>("promptBodyInput");
+const promptSubmitButton = element<HTMLButtonElement>("promptSubmitButton");
+const promptCancelButton = element<HTMLButtonElement>("promptCancelButton");
+const promptTemplateList = element<HTMLElement>("promptTemplateList");
 const dnrToggle = element<HTMLInputElement>("dnrToggle");
 const resetSettingsButton = element<HTMLButtonElement>("resetSettingsButton");
 const statusText = element<HTMLElement>("statusText");
 const CUSTOM_URL_ERROR = "Enter HTTPS, or http://localhost / http://127.0.0.1 for local testing. You can omit the protocol.";
+const PROMPT_TEMPLATE_ERROR = "Prompt title and body are required.";
 
 let settings: Settings;
 let editingCustomUrlId: string | null = null;
+let customPromptTemplates: PromptTemplate[] = [];
+let editingPromptTemplateId: string | null = null;
 
 void init();
 
 async function init(): Promise<void> {
   settings = await getSettings();
+  customPromptTemplates = await getCustomPromptTemplates();
   await migrateBareCustomDefault();
   render();
   bindEvents();
@@ -40,6 +60,15 @@ function bindEvents(): void {
   customUrlForm.addEventListener("submit", (event) => {
     event.preventDefault();
     void addCustomUrl();
+  });
+
+  promptTemplateForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void savePromptTemplate();
+  });
+
+  promptCancelButton.addEventListener("click", () => {
+    clearPromptTemplateForm();
   });
 
   customUrlList.addEventListener("submit", (event) => {
@@ -74,23 +103,47 @@ function bindEvents(): void {
     }
   });
 
+  promptTemplateList.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    if (target.dataset.editPromptId) {
+      beginEditPromptTemplate(target.dataset.editPromptId);
+      return;
+    }
+
+    if (target.dataset.deletePromptId) {
+      void removePromptTemplate(target.dataset.deletePromptId);
+    }
+  });
+
   resetSettingsButton.addEventListener("click", () => {
     void resetSettings();
   });
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !changes[SETTINGS_KEY]?.newValue) {
+    if (areaName !== "local") {
       return;
     }
 
-    settings = normalizeSettings(changes[SETTINGS_KEY].newValue);
-    render();
+    if (changes[CUSTOM_PROMPT_TEMPLATES_KEY]) {
+      customPromptTemplates = normalizeCustomPromptTemplates(changes[CUSTOM_PROMPT_TEMPLATES_KEY].newValue);
+      renderPromptTemplates();
+    }
+
+    if (changes[SETTINGS_KEY]?.newValue) {
+      settings = normalizeSettings(changes[SETTINGS_KEY].newValue);
+      render();
+    }
   });
 }
 
 function render(): void {
   renderDefaultSelect();
   renderCustomUrls();
+  renderPromptTemplates();
   dnrToggle.checked = settings.enableFrameHeaderRelaxation;
 }
 
@@ -125,6 +178,60 @@ function renderCustomUrls(): void {
   for (const customUrl of settings.customUrls) {
     customUrlList.append(customUrl.id === editingCustomUrlId ? editableCustomUrlRow(customUrl) : customUrlRow(customUrl));
   }
+}
+
+function renderPromptTemplates(): void {
+  promptTemplateList.textContent = "";
+
+  if (customPromptTemplates.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    const title = document.createElement("strong");
+    title.textContent = "No custom prompts yet";
+    const copy = document.createElement("p");
+    copy.textContent = "Add the prompts you reach for often, then use them from the Prompt palette.";
+    empty.append(title, copy);
+    promptTemplateList.append(empty);
+    return;
+  }
+
+  for (const template of customPromptTemplates) {
+    promptTemplateList.append(promptTemplateRow(template));
+  }
+}
+
+function promptTemplateRow(template: PromptTemplate): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "prompt-template-row";
+
+  const title = document.createElement("strong");
+  title.textContent = template.title;
+
+  const category = document.createElement("span");
+  category.textContent = template.category;
+
+  const body = document.createElement("span");
+  body.textContent = template.body.replace(/\s+/g, " ");
+  body.title = template.body;
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+
+  const editButton = document.createElement("button");
+  editButton.className = "button";
+  editButton.type = "button";
+  editButton.textContent = "Edit";
+  editButton.dataset.editPromptId = template.id;
+
+  const deleteButton = document.createElement("button");
+  deleteButton.className = "button";
+  deleteButton.type = "button";
+  deleteButton.textContent = "Remove";
+  deleteButton.dataset.deletePromptId = template.id;
+
+  actions.append(editButton, deleteButton);
+  row.append(title, category, body, actions);
+  return row;
 }
 
 function customUrlRow(customUrl: CustomUrl): HTMLElement {
@@ -260,6 +367,65 @@ async function deleteCustomUrl(id: string): Promise<void> {
 
   await persist("Custom URL removed.");
   render();
+}
+
+async function savePromptTemplate(): Promise<void> {
+  const title = promptTitleInput.value.trim();
+  const category = promptCategoryInput.value.trim();
+  const body = promptBodyInput.value.trim();
+
+  if (!title || !body) {
+    setStatus(PROMPT_TEMPLATE_ERROR);
+    return;
+  }
+
+  promptSubmitButton.disabled = true;
+  try {
+    const input = { title, category, body, favorite: true };
+    customPromptTemplates = editingPromptTemplateId
+      ? await updateCustomPromptTemplate(editingPromptTemplateId, input)
+      : await addCustomPromptTemplate(input);
+    const message = editingPromptTemplateId ? "Prompt saved." : "Prompt added.";
+    clearPromptTemplateForm();
+    renderPromptTemplates();
+    setStatus(message);
+  } finally {
+    promptSubmitButton.disabled = false;
+  }
+}
+
+function beginEditPromptTemplate(id: string): void {
+  const template = customPromptTemplates.find((item) => item.id === id);
+  if (!template) {
+    setStatus("That prompt is no longer available.");
+    return;
+  }
+
+  editingPromptTemplateId = template.id;
+  promptTitleInput.value = template.title;
+  promptCategoryInput.value = template.category;
+  promptBodyInput.value = template.body;
+  promptSubmitButton.textContent = "Save Prompt";
+  promptCancelButton.hidden = false;
+  promptTitleInput.focus();
+}
+
+async function removePromptTemplate(id: string): Promise<void> {
+  customPromptTemplates = await deleteCustomPromptTemplate(id);
+  if (editingPromptTemplateId === id) {
+    clearPromptTemplateForm();
+  }
+  renderPromptTemplates();
+  setStatus("Prompt removed.");
+}
+
+function clearPromptTemplateForm(): void {
+  editingPromptTemplateId = null;
+  promptTitleInput.value = "";
+  promptCategoryInput.value = "";
+  promptBodyInput.value = "";
+  promptSubmitButton.textContent = "Add Prompt";
+  promptCancelButton.hidden = true;
 }
 
 async function resetSettings(): Promise<void> {

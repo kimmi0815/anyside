@@ -8,13 +8,25 @@ declare namespace chrome {
   namespace runtime {
     type MessageSender = {
       tab?: tabs.Tab;
+      frameId?: number;
+      url?: string;
+    };
+
+    type Port = {
+      name: string;
+      sender?: MessageSender;
+      onDisconnect: ChromeEvent<(port: Port) => void>;
+      onMessage: ChromeEvent<(message: any, port: Port) => void>;
+      postMessage(message: any): void;
     };
 
     const onInstalled: ChromeEvent<() => void>;
     const onStartup: ChromeEvent<() => void>;
     const onMessage: ChromeEvent<(message: any, sender: MessageSender, sendResponse: (response?: any) => void) => boolean | void>;
+    const onConnect: ChromeEvent<(port: Port) => void>;
 
     function sendMessage(message: any): Promise<any>;
+    function connect(options?: { name?: string }): Port;
     function getURL(path: string): string;
     function openOptionsPage(): void;
     function getContexts(options: { contextTypes: string[]; documentUrls: string[] }): Promise<Array<Record<string, unknown>>>;

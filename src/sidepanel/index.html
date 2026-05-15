@@ -15,7 +15,7 @@
 
       <section class="location-bar" aria-label="Current service URL">
         <span>URL</span>
-        <input id="currentUrlInput" type="text" readonly aria-label="Current service URL">
+        <input id="currentUrlInput" type="text" inputmode="url" autocomplete="url" spellcheck="false" aria-label="Current service URL">
         <button id="reloadButton" class="icon-button" type="button" aria-label="Reload service" title="Reload service">
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/></svg>
         </button>
@@ -37,6 +37,18 @@
           tabindex="0"
           allow="clipboard-read; clipboard-write"
           referrerpolicy="strict-origin-when-cross-origin"></iframe>
+
+        <div id="composerToast" class="composer-toast" role="status" aria-live="polite" hidden></div>
+
+        <section id="contextPopover" class="composer-popover context-popover" hidden aria-label="Context actions">
+          <p id="contextSummary" class="composer-popover-hint">選択テキストなし</p>
+          <div id="contextActions" class="composer-menu" role="menu"></div>
+        </section>
+
+        <section id="promptPalette" class="composer-popover prompt-palette" hidden role="dialog" aria-modal="false" aria-label="Prompt palette">
+          <input id="promptSearchInput" class="prompt-search" type="search" placeholder="Promptを検索..." autocomplete="off">
+          <div id="promptList" class="prompt-list" role="listbox" aria-label="Prompt templates"></div>
+        </section>
 
         <section id="fallbackPanel" class="fallback" hidden>
           <div class="fallback-content">
@@ -60,6 +72,22 @@
             </div>
           </div>
         </section>
+      </section>
+
+      <section id="composerToolbar" class="composer-toolbar" aria-label="Prompt and context tools" data-expanded="false">
+        <button id="composerLauncherButton" class="composer-launcher-button" type="button" aria-label="Open prompt and context tools" aria-expanded="false" title="Prompt and context tools">
+          <span aria-hidden="true">✦</span>
+        </button>
+        <div id="composerActions" class="composer-actions">
+          <button id="contextButton" class="composer-button" type="button" aria-haspopup="menu" aria-expanded="false" title="Add page context">
+            <span class="composer-button-icon" aria-hidden="true">＋</span>
+            <span class="composer-button-label">Context</span>
+          </button>
+          <button id="promptButton" class="composer-button" type="button" aria-haspopup="dialog" aria-expanded="false" title="Open prompt palette (⌘K / Ctrl+K)">
+            <span class="composer-button-icon" aria-hidden="true">⌘</span>
+            <span class="composer-button-label">Prompt</span>
+          </button>
+        </div>
       </section>
 
       <details id="diagnosticsDetails" class="diagnostics" hidden>

@@ -1,3 +1,5 @@
+import type { AIService, InsertResult, PageContext } from "../features/composer/types.js";
+
 export type PresetId = "chatgpt" | "claude" | "gemini" | "notebooklm" | "keep";
 
 export type ActivePresetId = PresetId | "custom" | `custom:${string}`;
@@ -56,6 +58,8 @@ export type RuntimeMessage =
   | { type: "SET_DNR_ENABLED"; enabled: boolean; changeId?: string }
   | { type: "COPY_ACTIVE_TAB_PROMPT" }
   | { type: "COPY_TEXT"; text: string }
+  | { type: "GET_PAGE_CONTEXT" }
+  | { type: "INSERT_TEXT_TO_AI"; text: string; service: AIService; url: string }
   | { type: "OPEN_FALLBACK_WINDOW"; url: string }
   | { type: "OPEN_SIDE_PANEL" }
   | { type: "OFFSCREEN_COPY_TEXT"; target: "offscreen"; text: string };
@@ -66,4 +70,6 @@ export type RuntimeResponse = {
   settings?: Settings;
   windowId?: number;
   text?: string;
+  pageContext?: PageContext;
+  insertResult?: InsertResult;
 };

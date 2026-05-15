@@ -1,10 +1,16 @@
 import { Messages } from "../shared/messages.js";
+import { CONTEXT_ACTIONS, PROMPT_TEMPLATES, detectAIService, renderContextTemplate, renderPromptTemplate } from "../features/composer/index.js";
 import { BUILT_IN_PRESETS, diagnosticKey, resolveTarget } from "../shared/presets.js";
 import { getSettings, normalizeSettings, saveSettings, SETTINGS_KEY } from "../shared/storage.js";
+import { labelFromUrl, normalizeUserUrl } from "../shared/url.js";
+import { CUSTOM_PROMPT_TEMPLATES_KEY, getCustomPromptTemplates } from "../storage/promptTemplateStorage.js";
+import type { AIService, ContextMode, PageContext, PromptTemplate } from "../features/composer/types.js";
 import type { ActivePresetId, DiagnosticEntry, DiagnosticStatus, PresetId, RuntimeMessage, RuntimeResponse, Settings } from "../shared/types.js";
 
 const LOAD_NOTICE_MS = 4500;
 const LOAD_TIMEOUT_MS = 8000;
+const TOAST_MS = 2200;
+const RECENT_PROMPTS_KEY = "composer.recentPromptTemplateIds";
 
 const statusLive = element<HTMLElement>("statusLive");
 const statusBanner = element<HTMLElement>("statusBanner");
@@ -24,6 +30,18 @@ const fallbackOpenWindowButton = element<HTMLButtonElement>("fallbackOpenWindowB
 const fallbackReloadButton = element<HTMLButtonElement>("fallbackReloadButton");
 const setupPanel = element<HTMLElement>("setupPanel");
 const setupOptionsButton = element<HTMLButtonElement>("setupOptionsButton");
+const composerToast = element<HTMLElement>("composerToast");
+const composerToolbar = element<HTMLElement>("composerToolbar");
+const composerLauncherButton = element<HTMLButtonElement>("composerLauncherButton");
+const composerActions = element<HTMLElement>("composerActions");
+const contextButton = element<HTMLButtonElement>("contextButton");
+const promptButton = element<HTMLButtonElement>("promptButton");
+const contextPopover = element<HTMLElement>("contextPopover");
+const contextSummary = element<HTMLElement>("contextSummary");
+const contextActions = element<HTMLElement>("contextActions");
+const promptPalette = element<HTMLElement>("promptPalette");
+const promptSearchInput = element<HTMLInputElement>("promptSearchInput");
+const promptList = element<HTMLElement>("promptList");
 const diagnosticsDetails = element<HTMLDetailsElement>("diagnosticsDetails");
 const diagnosticsTable = element<HTMLTableSectionElement>("diagnosticsTable");
 const diagnosticsEnabled = isDebugMode();
@@ -55,12 +73,19 @@ let diagnosticSessionId = 0;
 let pendingDiagnosticSession: number | null = null;
 let finalizingDiagnosticSession: number | null = null;
 let localFrameModeReloadSuppressions: FrameModeReloadSuppression[] = [];
+let lastContext: PageContext | null = null;
+let promptQuery = "";
+let activePromptIndex = 0;
+let toastTimer: number | undefined;
+let composerCollapsed = true;
+let promptTemplates: PromptTemplate[] = [...PROMPT_TEMPLATES];
 
 void init();
 
 async function init(): Promise<void> {
   diagnosticsDetails.hidden = !diagnosticsEnabled;
   settings = await getSettings();
+  await loadPromptTemplates();
   syncSettingsUi();
   bindEvents();
 
@@ -68,15 +93,31 @@ async function init(): Promise<void> {
 }
 
 function bindEvents(): void {
-  reloadButton.addEventListener("click", () => reloadCurrentUrl());
+  reloadButton.addEventListener("click", () => loadUrlFromInput());
+  currentUrlInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    loadUrlFromInput();
+  });
   fallbackReloadButton.addEventListener("click", () => reloadCurrentUrl());
   fallbackOpenTabButton.addEventListener("click", () => void openCurrentInTab());
   fallbackOpenWindowButton.addEventListener("click", () => void openCurrentInFallbackWindow());
   setupOptionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
   moreActionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
+  bindComposerEvents();
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !changes[SETTINGS_KEY]?.newValue) {
+    if (areaName !== "local") {
+      return;
+    }
+
+    if (changes[CUSTOM_PROMPT_TEMPLATES_KEY]) {
+      void loadPromptTemplates();
+    }
+
+    if (!changes[SETTINGS_KEY]?.newValue) {
       return;
     }
 
@@ -147,6 +188,388 @@ function bindEvents(): void {
       }
     });
   }
+}
+
+function bindComposerEvents(): void {
+  composerLauncherButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setComposerExpanded(composerCollapsed);
+  });
+  contextButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setComposerExpanded(true);
+    void toggleContextPopover();
+  });
+  contextActions.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-mode]") : null;
+    if (!target) {
+      return;
+    }
+    void handleContextAction(target.dataset.mode as ContextMode);
+  });
+
+  promptButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setComposerExpanded(true);
+    openPromptPalette();
+  });
+  promptSearchInput.addEventListener("input", () => {
+    promptQuery = promptSearchInput.value;
+    activePromptIndex = 0;
+    renderPromptList();
+  });
+  promptList.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-template-id]") : null;
+    if (!target) {
+      return;
+    }
+    void handlePromptSelection(target.dataset.templateId || "");
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Node)) {
+      return;
+    }
+    if (!contextPopover.contains(target) && !composerToolbar.contains(target)) {
+      closeContextPopover();
+    }
+    if (!promptPalette.contains(target) && !composerToolbar.contains(target)) {
+      closePromptPalette();
+    }
+    if (!contextPopover.contains(target) && !promptPalette.contains(target) && !composerToolbar.contains(target)) {
+      setComposerExpanded(false);
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      setComposerExpanded(true);
+      openPromptPalette();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      closeContextPopover();
+      closePromptPalette();
+      setComposerExpanded(false);
+      return;
+    }
+
+    if (!promptPalette.hidden) {
+      handlePromptPaletteKeydown(event);
+    }
+  });
+  setComposerExpanded(false);
+}
+
+function setComposerExpanded(expanded: boolean): void {
+  composerCollapsed = !expanded;
+  composerToolbar.dataset.expanded = expanded ? "true" : "false";
+  composerLauncherButton.setAttribute("aria-expanded", expanded ? "true" : "false");
+  composerActions.setAttribute("aria-hidden", expanded ? "false" : "true");
+}
+
+async function toggleContextPopover(): Promise<void> {
+  if (!contextPopover.hidden) {
+    closeContextPopover();
+    return;
+  }
+
+  closePromptPalette();
+  setComposerExpanded(true);
+  contextButton.setAttribute("aria-expanded", "true");
+  contextPopover.hidden = false;
+  lastContext = await collectPageContext();
+  renderContextActions(lastContext);
+}
+
+function closeContextPopover(): void {
+  contextPopover.hidden = true;
+  contextButton.setAttribute("aria-expanded", "false");
+}
+
+function renderContextActions(context: PageContext): void {
+  contextActions.textContent = "";
+  const selectionLength = context.selection.trim().length;
+  contextSummary.textContent = selectionLength > 0 ? `選択中: ${selectionLength}文字` : "選択テキストなし";
+
+  for (const action of CONTEXT_ACTIONS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.mode = action.mode;
+    button.textContent = action.label;
+    if (action.requiresSelection && selectionLength === 0) {
+      button.title = "選択テキストがありません";
+      button.dataset.disabled = "true";
+    }
+    contextActions.append(button);
+  }
+}
+
+async function handleContextAction(mode: ContextMode): Promise<void> {
+  const context = lastContext || await collectPageContext();
+  if (mode === "selection" && !context.selection.trim()) {
+    showToast("選択テキストがありません");
+    return;
+  }
+
+  const text = renderContextTemplate(context, mode);
+  if (!text) {
+    showToast("このページではContextを取得できません");
+    return;
+  }
+
+  closeContextPopover();
+  const result = await insertIntoAI(text);
+  showToast(contextToastMessage(mode, result));
+  setComposerExpanded(false);
+}
+
+function openPromptPalette(): void {
+  closeContextPopover();
+  setComposerExpanded(true);
+  promptButton.setAttribute("aria-expanded", "true");
+  promptPalette.hidden = false;
+  promptQuery = promptSearchInput.value;
+  activePromptIndex = 0;
+  renderPromptList();
+  void loadPromptTemplates();
+  window.setTimeout(() => promptSearchInput.focus(), 0);
+}
+
+function closePromptPalette(): void {
+  promptPalette.hidden = true;
+  promptButton.setAttribute("aria-expanded", "false");
+}
+
+function renderPromptList(): void {
+  promptList.textContent = "";
+  const templates = filteredPromptTemplates();
+  if (templates.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "composer-empty";
+    empty.textContent = promptTemplates.length === 0 ? "OptionsでPromptを追加してください" : "一致するPromptがありません";
+    promptList.append(empty);
+    return;
+  }
+
+  activePromptIndex = Math.max(0, Math.min(activePromptIndex, templates.length - 1));
+  const recentIds = readRecentPromptIds();
+  templates.forEach((template, index) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "prompt-row";
+    row.dataset.templateId = template.id;
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", index === activePromptIndex ? "true" : "false");
+
+    const title = document.createElement("span");
+    title.className = "prompt-row-title";
+    title.textContent = `${template.favorite ? "★ " : ""}${template.title}`;
+
+    const meta = document.createElement("span");
+    meta.className = "prompt-row-meta";
+    meta.textContent = `${recentIds.includes(template.id) ? "最近使用 · " : ""}${template.category}`;
+
+    row.append(title, meta);
+    promptList.append(row);
+  });
+}
+
+function filteredPromptTemplates(): PromptTemplate[] {
+  const normalizedQuery = promptQuery.trim().toLowerCase();
+  const recentIds = readRecentPromptIds();
+  const ordered = [...promptTemplates].sort((left, right) => promptRank(right, recentIds) - promptRank(left, recentIds));
+  if (!normalizedQuery) {
+    return ordered;
+  }
+
+  return ordered.filter((template) => {
+    const haystack = `${template.title} ${template.category} ${template.body}`.toLowerCase();
+    return haystack.includes(normalizedQuery);
+  });
+}
+
+function promptRank(template: PromptTemplate, recentIds: string[]): number {
+  const recentIndex = recentIds.indexOf(template.id);
+  const recentScore = recentIndex === -1 ? 0 : 100 - recentIndex;
+  return recentScore + (template.favorite ? 10 : 0);
+}
+
+function handlePromptPaletteKeydown(event: KeyboardEvent): void {
+  const templates = filteredPromptTemplates();
+  if (templates.length === 0) {
+    return;
+  }
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    activePromptIndex = Math.min(activePromptIndex + 1, templates.length - 1);
+    renderPromptList();
+    return;
+  }
+
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    activePromptIndex = Math.max(activePromptIndex - 1, 0);
+    renderPromptList();
+    return;
+  }
+
+  if (event.key === "Enter") {
+    if (event.isComposing || event.keyCode === 229) {
+      return;
+    }
+    event.preventDefault();
+    void handlePromptSelection(templates[activePromptIndex].id);
+  }
+}
+
+async function handlePromptSelection(templateId: string): Promise<void> {
+  const template = promptTemplates.find((item) => item.id === templateId);
+  if (!template) {
+    return;
+  }
+
+  const context = await collectPageContext();
+  const service = currentAIService();
+  const text = renderPromptTemplate(template.body, context, service);
+  rememberPromptTemplate(template.id);
+  closePromptPalette();
+  const result = await insertIntoAI(text);
+  showToast(result.method === "direct" ? "Promptを挿入しました" : result.message || "Promptをコピーしました");
+  setComposerExpanded(false);
+}
+
+async function collectPageContext(): Promise<PageContext> {
+  const fallback = emptyPageContext();
+  const response = await sendMessage({ type: Messages.GET_PAGE_CONTEXT });
+  if (!response.ok || !response.pageContext) {
+    return fallback;
+  }
+
+  return normalizePageContext(response.pageContext);
+}
+
+function normalizePageContext(context: PageContext): PageContext {
+  return {
+    title: typeof context.title === "string" ? context.title : "",
+    url: typeof context.url === "string" ? context.url : "",
+    selection: typeof context.selection === "string" ? context.selection : "",
+    timestamp: typeof context.timestamp === "number" ? context.timestamp : Date.now()
+  };
+}
+
+function emptyPageContext(): PageContext {
+  return {
+    title: "",
+    url: "",
+    selection: "",
+    timestamp: Date.now()
+  };
+}
+
+async function insertIntoAI(text: string) {
+  const service = currentAIService();
+  const response = await sendMessage({
+    type: Messages.INSERT_TEXT_TO_AI,
+    text,
+    service,
+    url: currentUrl
+  });
+
+  if (response.ok && response.insertResult) {
+    return response.insertResult;
+  }
+
+  const copied = await copyTextFromSidePanel(text);
+  if (copied) {
+    return {
+      success: true,
+      method: "clipboard" as const,
+      service,
+      reason: "agent-unavailable" as const,
+      message: response.error || "AIページと接続できないためコピーしました"
+    };
+  }
+
+  return {
+    success: false,
+    method: "clipboard" as const,
+    service,
+    reason: "agent-unavailable" as const,
+    message: response.error || "クリップボードへコピーできませんでした"
+  };
+}
+
+async function copyTextFromSidePanel(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Some side panel contexts do not expose clipboard writes without an explicit fallback.
+  }
+
+  const response = await sendMessage({ type: Messages.COPY_TEXT, text });
+  return response.ok === true;
+}
+
+function currentAIService(): AIService {
+  return detectAIService(currentUrl);
+}
+
+function contextToastMessage(mode: ContextMode, result: { method: "direct" | "clipboard"; message?: string }): string {
+  if (result.method === "clipboard") {
+    return result.message || "入力欄が見つからないためコピーしました";
+  }
+
+  switch (mode) {
+    case "url":
+      return "URLを挿入しました";
+    case "title_url":
+    case "selection":
+    case "full_context":
+    case "ask_about_page":
+    case "summarize_page":
+      return "入力欄に挿入しました";
+  }
+}
+
+function readRecentPromptIds(): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(RECENT_PROMPTS_KEY) || "[]");
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberPromptTemplate(templateId: string): void {
+  const next = [templateId, ...readRecentPromptIds().filter((id) => id !== templateId)].slice(0, 6);
+  localStorage.setItem(RECENT_PROMPTS_KEY, JSON.stringify(next));
+}
+
+async function loadPromptTemplates(): Promise<void> {
+  const customTemplates = await getCustomPromptTemplates();
+  promptTemplates = [...PROMPT_TEMPLATES, ...customTemplates];
+  if (!promptPalette.hidden) {
+    renderPromptList();
+  }
+}
+
+function showToast(message: string): void {
+  if (toastTimer !== undefined) {
+    window.clearTimeout(toastTimer);
+  }
+
+  composerToast.textContent = message;
+  composerToast.hidden = false;
+  toastTimer = window.setTimeout(() => {
+    composerToast.hidden = true;
+    toastTimer = undefined;
+  }, TOAST_MS);
 }
 
 async function loadConfiguredTarget(): Promise<void> {
@@ -270,6 +693,17 @@ function reloadCurrentUrl(): void {
     return;
   }
   loadUrl(currentLabel || "AI service", currentUrl);
+}
+
+function loadUrlFromInput(): void {
+  const nextUrl = normalizeUserUrl(currentUrlInput.value);
+  if (!nextUrl) {
+    currentUrlInput.title = "Enter HTTPS, or http://localhost / http://127.0.0.1 for local testing.";
+    setStatus("Enter a valid HTTPS URL or local development URL.", "error");
+    return;
+  }
+
+  loadUrl(labelFromUrl(nextUrl), nextUrl);
 }
 
 async function openCurrentInTab(): Promise<void> {
@@ -681,20 +1115,9 @@ function modeLabel(enabled: boolean): string {
 }
 
 function updateCurrentUrlDisplay(url: string): void {
-  currentUrlInput.value = url ? compactUrl(url) : "";
+  currentUrlInput.value = url;
   currentUrlInput.title = url;
   currentUrlInput.setAttribute("aria-label", url ? `Current service URL: ${url}` : "No service URL selected");
-}
-
-function compactUrl(value: string): string {
-  try {
-    const url = new URL(value);
-    const path = url.pathname && url.pathname !== "/" ? url.pathname.replace(/\/$/, "") : "";
-    return `${url.host || url.hostname}${path}` || value;
-  } catch {
-    const withoutProtocol = value.replace(/^[a-z][a-z\d+\-.]*:\/\//i, "");
-    return withoutProtocol.split(/[?#]/, 1)[0].replace(/\/$/, "") || value;
-  }
 }
 
 function canonicalUrl(value: string): string {

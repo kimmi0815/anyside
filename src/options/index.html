@@ -43,6 +43,30 @@
       </section>
 
       <section class="option-card">
+        <h2>Prompt templates</h2>
+        <form id="promptTemplateForm" class="prompt-form" novalidate>
+          <label class="field">
+            <span>Title</span>
+            <input id="promptTitleInput" type="text" autocomplete="off" placeholder="このページを深掘り">
+          </label>
+          <label class="field">
+            <span>Category</span>
+            <input id="promptCategoryInput" type="text" autocomplete="off" placeholder="カスタム">
+          </label>
+          <label class="field prompt-body-field">
+            <span>Prompt body</span>
+            <textarea id="promptBodyInput" rows="7" spellcheck="true" placeholder="次のページについて...&#10;&#10;タイトル:&#10;{{title}}&#10;&#10;URL:&#10;{{url}}&#10;&#10;内容:&#10;{{selection}}"></textarea>
+          </label>
+          <div class="form-actions">
+            <button id="promptSubmitButton" class="button primary" type="submit">Add Prompt</button>
+            <button id="promptCancelButton" class="button" type="button" hidden>Cancel edit</button>
+          </div>
+        </form>
+        <p class="hint">Use {{title}}, {{url}}, {{selection}}, {{date}}, and {{service}} in custom prompts.</p>
+        <div id="promptTemplateList" class="prompt-template-list"></div>
+      </section>
+
+      <section class="option-card">
         <h2>Iframe compatibility</h2>
         <label class="toggle-row">
           <input id="dnrToggle" type="checkbox">

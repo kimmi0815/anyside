@@ -1,6 +1,8 @@
 import { Messages } from "../shared/messages.js";
+import { detectAIService } from "../features/composer/lib/aiService.js";
 import { createActiveTabPrompt, createSelectionPrompt } from "../shared/prompt.js";
 import { FALLBACK_WINDOW_KEY, getSettings, saveSettings, updateSettings } from "../shared/storage.js";
+import type { AIInputInsertReason, AIService, InsertResult, PageContext } from "../features/composer/types.js";
 import type { FallbackWindowState, RuntimeMessage, RuntimeResponse } from "../shared/types.js";
 
 const DNR_RULESET_ID = "allow_framing_ai_sites";
@@ -8,6 +10,32 @@ const OFFSCREEN_DOCUMENT_PATH = "src/offscreen/clipboard.html";
 const MENU_SELECTION_ID = "ask-anyside-selection";
 const MENU_OPEN_ID = "open-anyside";
 const LEGACY_FALLBACK_WINDOW_KEY = "aiSidecar.fallbackWindow";
+const AI_INPUT_AGENT_PORT = "ai-input-agent";
+const INSERT_TIMEOUT_MS = 1200;
+
+type AiAgentRecord = {
+  port: chrome.runtime.Port;
+  service: AIService;
+  url: string;
+  connectedAt: number;
+};
+
+type AiAgentReadyMessage = {
+  type: "AI_AGENT_READY";
+  service: AIService;
+  url: string;
+};
+
+type AiInsertResultMessage = {
+  type: "INSERT_TEXT_RESULT";
+  requestId?: string;
+  success: boolean;
+  reason?: AIInputInsertReason;
+  service: AIService;
+  message?: string;
+};
+
+const aiInputAgents = new Set<AiAgentRecord>();
 
 chrome.runtime.onInstalled.addListener(() => {
   void initializeExtension({ resetMenus: true });
@@ -38,6 +66,38 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
 
   return true;
+});
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== AI_INPUT_AGENT_PORT) {
+    return;
+  }
+
+  let record: AiAgentRecord | undefined;
+
+  port.onMessage.addListener((message: AiAgentReadyMessage) => {
+    if (message?.type !== "AI_AGENT_READY") {
+      return;
+    }
+
+    if (record) {
+      aiInputAgents.delete(record);
+    }
+
+    record = {
+      port,
+      service: message.service || detectAIService(message.url || port.sender?.url || ""),
+      url: message.url || port.sender?.url || "",
+      connectedAt: Date.now()
+    };
+    aiInputAgents.add(record);
+  });
+
+  port.onDisconnect.addListener(() => {
+    if (record) {
+      aiInputAgents.delete(record);
+    }
+  });
 });
 
 chrome.windows.onRemoved.addListener((windowId) => {
@@ -99,6 +159,16 @@ async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runt
       return { ok: true, text: message.text };
     }
 
+    case Messages.GET_PAGE_CONTEXT: {
+      const pageContext = await getPageContextFromActiveTab();
+      return { ok: true, pageContext };
+    }
+
+    case Messages.INSERT_TEXT_TO_AI: {
+      const insertResult = await insertTextIntoAI(message.text, message.service, message.url);
+      return { ok: true, insertResult, text: message.text };
+    }
+
     case Messages.OPEN_FALLBACK_WINDOW: {
       const windowId = await openFallbackWindow(message.url, sender.tab?.windowId);
       return { ok: true, windowId };
@@ -111,6 +181,148 @@ async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runt
 
     default:
       return { ok: false, error: "Unsupported message." };
+  }
+}
+
+async function getPageContextFromActiveTab(): Promise<PageContext> {
+  const tab = await getActiveTab();
+  const fallback = createPageContext(tab?.title, tab?.url, "");
+  if (tab?.id === undefined || !canInjectIntoTab(tab)) {
+    return fallback;
+  }
+
+  try {
+    const [result] = await chrome.scripting.executeScript<PageContext>({
+      target: { tabId: tab.id },
+      func: () => ({
+        title: document.title || "",
+        url: location.href || "",
+        selection: window.getSelection()?.toString() || "",
+        timestamp: Date.now()
+      })
+    });
+
+    return normalizePageContext(result?.result, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function createPageContext(title: string | undefined, url: string | undefined, selection: string): PageContext {
+  return {
+    title: title || "",
+    url: url || "",
+    selection,
+    timestamp: Date.now()
+  };
+}
+
+function normalizePageContext(value: PageContext | undefined, fallback: PageContext): PageContext {
+  if (!value || typeof value !== "object") {
+    return fallback;
+  }
+
+  return {
+    title: typeof value.title === "string" ? value.title : fallback.title,
+    url: typeof value.url === "string" ? value.url : fallback.url,
+    selection: typeof value.selection === "string" ? value.selection : "",
+    timestamp: typeof value.timestamp === "number" ? value.timestamp : Date.now()
+  };
+}
+
+async function insertTextIntoAI(text: string, service: AIService, url: string): Promise<InsertResult> {
+  const agent = findAiInputAgent(service, url);
+  if (agent) {
+    const result = await requestAgentInsert(agent.port, text);
+    if (result.success) {
+      return {
+        success: true,
+        method: "direct",
+        service: agent.service,
+        reason: "inserted",
+        message: "Inserted into AI input."
+      };
+    }
+
+    await copyText(text);
+    await flashBadge("Copied");
+    return {
+      success: true,
+      method: "clipboard",
+      service,
+      reason: result.reason,
+      message: result.reason === "no-input"
+        ? "入力欄が見つからないためコピーしました"
+        : "入力欄へ挿入できないためコピーしました"
+    };
+  }
+
+  await copyText(text);
+  await flashBadge("Copied");
+  return {
+    success: true,
+    method: "clipboard",
+    service,
+    reason: "agent-unavailable",
+    message: "AIページと接続できないためコピーしました"
+  };
+}
+
+function findAiInputAgent(service: AIService, url: string): AiAgentRecord | undefined {
+  const agents = [...aiInputAgents]
+    .filter((agent) => agent.service === service || sameOrigin(agent.url, url))
+    .sort((a, b) => b.connectedAt - a.connectedAt);
+
+  if (agents[0]) {
+    return agents[0];
+  }
+
+  if (service === "unknown") {
+    return [...aiInputAgents].sort((a, b) => b.connectedAt - a.connectedAt)[0];
+  }
+
+  return undefined;
+}
+
+async function requestAgentInsert(port: chrome.runtime.Port, text: string): Promise<{ success: boolean; reason: AIInputInsertReason }> {
+  const requestId = crypto.randomUUID();
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => finish(false, "insert-failed"), INSERT_TIMEOUT_MS);
+    const listener = (message: AiInsertResultMessage) => {
+      if (message?.type !== "INSERT_TEXT_RESULT") {
+        return;
+      }
+      if (message.requestId && message.requestId !== requestId) {
+        return;
+      }
+      finish(message.success === true, message.reason || (message.success ? "inserted" : "insert-failed"));
+    };
+    const finish = (success: boolean, reason: AIInputInsertReason) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      port.onMessage.removeListener(listener);
+      resolve({ success, reason });
+    };
+
+    port.onMessage.addListener(listener);
+    try {
+      port.postMessage({ type: "INSERT_TEXT", requestId, text });
+    } catch {
+      finish(false, "insert-failed");
+    }
+  });
+}
+
+function sameOrigin(left: string, right: string): boolean {
+  try {
+    return new URL(left).origin === new URL(right).origin;
+  } catch {
+    return false;
   }
 }
 
