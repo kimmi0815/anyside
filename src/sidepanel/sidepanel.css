@@ -586,10 +586,6 @@ iframe {
   cursor: default;
 }
 
-.composer-menu button[data-disabled="true"] {
-  color: var(--text-tertiary);
-}
-
 .prompt-search {
   width: 100%;
   height: 34px;

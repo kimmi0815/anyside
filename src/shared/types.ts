@@ -1,6 +1,6 @@
 import type { AIService, InsertResult, PageContext } from "../features/composer/types.js";
 
-export type PresetId = "chatgpt" | "claude" | "gemini" | "notebooklm";
+export type PresetId = "chatgpt" | "claude" | "gemini" | "perplexity" | "notebooklm";
 
 export type ActivePresetId = PresetId | "custom" | `custom:${string}`;
 

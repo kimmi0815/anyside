@@ -14,6 +14,7 @@ const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
   chatgpt: "../../assets/service-icons/chatgpt.svg",
   claude: "../../assets/service-icons/claude.png",
   gemini: "../../assets/service-icons/gemini.png",
+  perplexity: "../../assets/service-icons/perplexity.svg",
   notebooklm: "../../assets/service-icons/notebooklm.svg"
 };
 
@@ -261,7 +262,7 @@ function bindComposerEvents(): void {
   });
   contextActions.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-mode]") : null;
-    if (!target) {
+    if (!target || target.disabled) {
       return;
     }
     void handleContextAction(target.dataset.mode as ContextMode);
@@ -333,7 +334,7 @@ function setComposerExpanded(expanded: boolean): void {
   composerCollapsed = !expanded;
   composerToolbar.dataset.expanded = expanded ? "true" : "false";
   composerLauncherButton.setAttribute("aria-expanded", expanded ? "true" : "false");
-  composerActions.setAttribute("aria-hidden", expanded ? "false" : "true");
+  composerActions.setAttribute("aria-hidden", "false");
 }
 
 async function toggleContextPopover(): Promise<void> {
@@ -382,7 +383,8 @@ function renderContextActions(context: PageContext): void {
     button.textContent = action.label;
     if (action.requiresSelection && selectionLength === 0) {
       button.title = "選択テキストがありません";
-      button.dataset.disabled = "true";
+      button.disabled = true;
+      button.setAttribute("aria-disabled", "true");
     }
     contextActions.append(button);
   }

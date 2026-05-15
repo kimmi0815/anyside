@@ -5,9 +5,10 @@
   "type": "module",
   "description": "A Manifest V3 Chrome extension that keeps AI services in the Chrome Side Panel.",
   "scripts": {
+    "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.json",
-    "build:local": "node scripts/build.mjs",
+    "build": "npm run clean && tsc -p tsconfig.json && node scripts/build.mjs --bundle-content",
+    "build:local": "node scripts/build.mjs --strip-types",
     "test": "npm run typecheck && npm run build && node --test test/*.test.mjs",
     "release:zip": "npm run typecheck && npm run build && node scripts/package-extension.mjs"
   },

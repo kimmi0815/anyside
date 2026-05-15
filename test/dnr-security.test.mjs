@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
+import { FRAME_COMPATIBILITY_DOMAINS } from "../dist/shared/presets.js";
+
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
 test("DNR compatibility ruleset is packaged disabled by default", async () => {
@@ -24,4 +26,13 @@ test("DNR compatibility rule does not remove report-only CSP headers", async () 
   );
 
   assert.deepEqual(removedHeaders.sort(), ["content-security-policy", "x-frame-options"]);
+});
+
+test("DNR compatibility request domains match built-in frame compatibility domains", async () => {
+  const rules = JSON.parse(await readFile(join(root, "rules/allow-framing-ai-sites.json"), "utf8"));
+  const requestDomains = rules.flatMap((rule) => rule.condition.requestDomains ?? []);
+
+  assert.deepEqual([...requestDomains].sort(), [...FRAME_COMPATIBILITY_DOMAINS].sort());
+  assert.equal(requestDomains.includes("keep.google.com"), false);
+  assert.equal(requestDomains.includes("www.perplexity.ai"), true);
 });

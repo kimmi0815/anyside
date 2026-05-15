@@ -4,8 +4,11 @@ export const BUILT_IN_PRESETS: BuiltInPreset[] = [
   { id: "chatgpt", label: "ChatGPT", url: "https://chatgpt.com/" },
   { id: "claude", label: "Claude", url: "https://claude.ai/" },
   { id: "gemini", label: "Gemini", url: "https://gemini.google.com/" },
+  { id: "perplexity", label: "Perplexity", url: "https://www.perplexity.ai/" },
   { id: "notebooklm", label: "NotebookLM", url: "https://notebooklm.google.com/" }
 ];
+
+export const FRAME_COMPATIBILITY_DOMAINS = BUILT_IN_PRESETS.map((preset) => new URL(preset.url).hostname);
 
 export const DEFAULT_PRESET_ID: PresetId = "chatgpt";
 export const CUSTOM_PRESET_ID = "custom";

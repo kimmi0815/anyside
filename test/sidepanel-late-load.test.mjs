@@ -168,11 +168,12 @@ test("side panel service switcher loads registered services and custom URLs", as
         chatgpt: "https://chatgpt.com/",
         claude: "https://claude.ai/",
         gemini: "https://gemini.google.com/",
+        perplexity: "https://www.perplexity.ai/",
         notebooklm: "https://notebooklm.google.com/",
         custom: "",
         "custom:research": "https://research.example.com/"
       },
-      serviceOrder: ["claude", "chatgpt", "custom:research", "gemini", "notebooklm"],
+      serviceOrder: ["claude", "chatgpt", "custom:research", "gemini", "perplexity", "notebooklm"],
       hiddenServiceIds: [],
       enableFrameHeaderRelaxation: false,
       frameHeaderRelaxationAcknowledged: false,
@@ -203,11 +204,12 @@ test("side panel service switcher loads registered services and custom URLs", as
     await flushAsync();
 
     assert.match(textTree(document.getElementById("serviceSwitcher")), /ChatGPT/);
+    assert.match(textTree(document.getElementById("serviceSwitcher")), /Perplexity/);
     assert.match(textTree(document.getElementById("serviceSwitcher")), /Research/);
     assert.doesNotMatch(textTree(document.getElementById("serviceSwitcher")), /Google Keep/);
     assert.deepEqual(
       document.getElementById("serviceSwitcher").children.map((child) => child.dataset.presetId),
-      ["claude", "chatgpt", "custom:research", "gemini", "notebooklm"]
+      ["claude", "chatgpt", "custom:research", "gemini", "perplexity", "notebooklm"]
     );
     assert.equal(document.getElementById("serviceSwitcher").children[0].dataset.presetId, "claude");
     assert.equal(document.getElementById("moreActionsButton").hidden, false);
@@ -301,9 +303,13 @@ test("side panel composer menus close from toggles and the dismiss layer", async
     await flushAsync();
 
     const toolbar = document.getElementById("composerToolbar");
+    const composerActions = document.getElementById("composerActions");
     const promptPalette = document.getElementById("promptPalette");
     const contextPopover = document.getElementById("contextPopover");
     const dismissLayer = document.getElementById("dismissLayer");
+
+    assert.equal(toolbar.dataset.expanded, "false");
+    assert.equal(composerActions.attributes["aria-hidden"], "false");
 
     document.getElementById("promptButton").dispatch("click");
     assert.equal(promptPalette.hidden, false);
@@ -318,6 +324,14 @@ test("side panel composer menus close from toggles and the dismiss layer", async
     await flushAsync();
     assert.equal(contextPopover.hidden, false);
     assert.equal(dismissLayer.hidden, false);
+    assert.equal(composerActions.attributes["aria-hidden"], "false");
+
+    const selectionAction = findByDataset(document.getElementById("contextActions"), "mode", "selection");
+    assert.equal(selectionAction.disabled, true);
+    assert.equal(selectionAction.attributes["aria-disabled"], "true");
+    document.getElementById("contextActions").dispatch("click", { target: selectionAction });
+    await flushAsync();
+    assert.equal(document.getElementById("composerToast").hidden, true);
 
     document.getElementById("contextButton").dispatch("click");
     assert.equal(contextPopover.hidden, true);
@@ -448,6 +462,19 @@ function textTree(element) {
     element.textContent,
     ...element.children.flatMap((child) => textTree(child))
   ].join(" ");
+}
+
+function findByDataset(element, key, value) {
+  if (element.dataset[key] === value) {
+    return element;
+  }
+  for (const child of element.children) {
+    const found = findByDataset(child, key, value);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
 }
 
 function createScheduler() {

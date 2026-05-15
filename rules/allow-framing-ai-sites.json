@@ -20,8 +20,8 @@
         "chatgpt.com",
         "claude.ai",
         "gemini.google.com",
-        "notebooklm.google.com",
-        "keep.google.com"
+        "www.perplexity.ai",
+        "notebooklm.google.com"
       ],
       "resourceTypes": ["sub_frame"]
     }

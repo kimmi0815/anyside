@@ -71,9 +71,9 @@
         <h2>Iframe compatibility</h2>
         <label class="toggle-row">
           <input id="dnrToggle" type="checkbox">
-          <span>Relax frame-blocking headers for allowlisted AI subframes</span>
+          <span>Relax frame-blocking headers for built-in AI subframes</span>
         </label>
-        <p class="hint">Off by default. Enabling this removes selected frame-blocking headers from allowlisted AI subframe requests while the mode is on. Use it only for services you trust; fallback window mode is safer when iframe loading is unreliable.</p>
+        <p class="hint">Off by default. Enabling this removes selected frame-blocking headers from subframe requests to chatgpt.com, claude.ai, gemini.google.com, www.perplexity.ai, and notebooklm.google.com while the mode is on. Chrome applies the rules browser-wide, not only inside anyside's Side Panel. Custom URLs and main-frame browsing are not covered.</p>
       </section>
 
       <div class="footer-actions">

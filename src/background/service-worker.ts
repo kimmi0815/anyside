@@ -17,6 +17,11 @@ type AiAgentRecord = {
   port: chrome.runtime.Port;
   service: AIService;
   url: string;
+  senderUrl: string;
+  tabId?: number;
+  windowId?: number;
+  frameId?: number;
+  documentId?: string;
   connectedAt: number;
 };
 
@@ -35,9 +40,26 @@ type AiInsertResultMessage = {
   message?: string;
 };
 
+type AiAgentTarget = {
+  service: AIService;
+  url: string;
+  senderUrl?: string;
+  tabId?: number;
+  fallbackTabId?: number;
+  fallbackUrl?: string;
+  frameId?: number;
+  documentId?: string;
+};
+
+type AiAgentSelection =
+  | { status: "matched"; agent: AiAgentRecord }
+  | { status: "ambiguous" }
+  | { status: "unavailable" };
+
 const aiInputAgents = new Set<AiAgentRecord>();
 
 let initializationPromise: Promise<void> | undefined;
+let offscreenDocumentPromise: Promise<void> | undefined;
 
 function ensureInitialized(options: { resetMenus: boolean } = { resetMenus: false }): Promise<void> {
   if (!initializationPromise) {
@@ -89,10 +111,17 @@ chrome.runtime.onConnect.addListener((port) => {
       aiInputAgents.delete(record);
     }
 
+    const senderUrl = port.sender?.url || "";
+    const url = message.url || senderUrl;
     record = {
       port,
-      service: message.service || detectAIService(message.url || port.sender?.url || ""),
-      url: message.url || port.sender?.url || "",
+      service: message.service || detectAIService(url),
+      url,
+      senderUrl,
+      tabId: port.sender?.tab?.id,
+      windowId: port.sender?.tab?.windowId,
+      frameId: port.sender?.frameId,
+      documentId: getSenderDocumentId(port.sender),
       connectedAt: Date.now()
     };
     aiInputAgents.add(record);
@@ -170,7 +199,7 @@ async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runt
     }
 
     case Messages.INSERT_TEXT_TO_AI: {
-      const insertResult = await insertTextIntoAI(message.text, message.service, message.url);
+      const insertResult = await insertTextIntoAI(message.text, message.service, message.url, sender);
       return { ok: true, insertResult, text: message.text };
     }
 
@@ -235,15 +264,27 @@ function normalizePageContext(value: PageContext | undefined, fallback: PageCont
   };
 }
 
-async function insertTextIntoAI(text: string, service: AIService, url: string): Promise<InsertResult> {
-  const agent = findAiInputAgent(service, url);
-  if (agent) {
-    const result = await requestAgentInsert(agent.port, text);
+async function insertTextIntoAI(
+  text: string,
+  service: AIService,
+  url: string,
+  sender?: chrome.runtime.MessageSender
+): Promise<InsertResult> {
+  const selection = await findAiInputAgent({
+    service,
+    url,
+    senderUrl: sender?.url,
+    tabId: sender?.tab?.id,
+    frameId: sender?.frameId,
+    documentId: getSenderDocumentId(sender)
+  });
+  if (selection.status === "matched") {
+    const result = await requestAgentInsert(selection.agent.port, text);
     if (result.success) {
       return {
         success: true,
         method: "direct",
-        service: agent.service,
+        service: selection.agent.service,
         reason: "inserted",
         message: "Inserted into AI input."
       };
@@ -269,24 +310,77 @@ async function insertTextIntoAI(text: string, service: AIService, url: string): 
     method: "clipboard",
     service,
     reason: "agent-unavailable",
-    message: "AIページと接続できないためコピーしました"
+    message: selection.status === "ambiguous"
+      ? "AIページを特定できないためコピーしました"
+      : "AIページと接続できないためコピーしました"
   };
 }
 
-function findAiInputAgent(service: AIService, url: string): AiAgentRecord | undefined {
-  const agents = [...aiInputAgents]
-    .filter((agent) => agent.service === service || sameOrigin(agent.url, url))
-    .sort((a, b) => b.connectedAt - a.connectedAt);
+async function findAiInputAgent(target: AiAgentTarget): Promise<AiAgentSelection> {
+  const fallbackWindow = await getFallbackWindowState().catch((): FallbackWindowState => ({}));
+  return selectAiInputAgent([...aiInputAgents], {
+    ...target,
+    fallbackTabId: fallbackWindow.tabId,
+    fallbackUrl: fallbackWindow.url
+  });
+}
 
-  if (agents[0]) {
-    return agents[0];
+function selectAiInputAgent(agents: AiAgentRecord[], target: AiAgentTarget): AiAgentSelection {
+  if (target.service === "unknown" || !isValidUrl(target.url)) {
+    return { status: "unavailable" };
   }
 
-  if (service === "unknown") {
-    return [...aiInputAgents].sort((a, b) => b.connectedAt - a.connectedAt)[0];
+  const matchingAgents = agents.filter((agent) => {
+    return agent.service === target.service && matchesOrigin(agent, target.url);
+  });
+
+  if (matchingAgents.length === 0) {
+    return { status: "unavailable" };
   }
 
-  return undefined;
+  const byDocument = target.documentId
+    ? uniqueAgent(matchingAgents.filter((agent) => agent.documentId === target.documentId))
+    : undefined;
+  if (byDocument && byDocument.status !== "unavailable") {
+    return byDocument;
+  }
+
+  const byFrame = target.tabId !== undefined && target.frameId !== undefined
+    ? uniqueAgent(matchingAgents.filter((agent) => agent.tabId === target.tabId && agent.frameId === target.frameId))
+    : undefined;
+  if (byFrame && byFrame.status !== "unavailable") {
+    return byFrame;
+  }
+
+  if (target.fallbackTabId !== undefined && (!target.fallbackUrl || sameOrigin(target.fallbackUrl, target.url))) {
+    const fallbackAgent = uniqueAgent(matchingAgents.filter((agent) => agent.tabId === target.fallbackTabId));
+    if (fallbackAgent.status !== "unavailable") {
+      return fallbackAgent;
+    }
+  }
+
+  const sidePanelCandidates = matchingAgents.filter((agent) => agent.tabId === undefined);
+  const exactSidePanelAgent = uniqueAgent(sidePanelCandidates.filter((agent) => matchesExactUrl(agent, target.url)));
+  if (exactSidePanelAgent.status !== "unavailable") {
+    return exactSidePanelAgent;
+  }
+
+  const sidePanelAgent = uniqueAgent(sidePanelCandidates);
+  if (sidePanelAgent.status !== "unavailable") {
+    return sidePanelAgent;
+  }
+
+  return { status: "ambiguous" };
+}
+
+function uniqueAgent(agents: AiAgentRecord[]): AiAgentSelection {
+  if (agents.length === 0) {
+    return { status: "unavailable" };
+  }
+  if (agents.length === 1) {
+    return { status: "matched", agent: agents[0] };
+  }
+  return { status: "ambiguous" };
 }
 
 async function requestAgentInsert(port: chrome.runtime.Port, text: string): Promise<{ success: boolean; reason: AIInputInsertReason }> {
@@ -340,6 +434,35 @@ function sameOrigin(left: string, right: string): boolean {
   }
 }
 
+function matchesOrigin(agent: AiAgentRecord, url: string): boolean {
+  return sameOrigin(agent.url, url) || sameOrigin(agent.senderUrl, url);
+}
+
+function matchesExactUrl(agent: AiAgentRecord, url: string): boolean {
+  return sameUrl(agent.url, url) || sameUrl(agent.senderUrl, url);
+}
+
+function sameUrl(left: string, right: string): boolean {
+  try {
+    return new URL(left).href === new URL(right).href;
+  } catch {
+    return false;
+  }
+}
+
+function isValidUrl(url: string): boolean {
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getSenderDocumentId(sender: chrome.runtime.MessageSender | undefined): string | undefined {
+  return (sender as (chrome.runtime.MessageSender & { documentId?: string }) | undefined)?.documentId;
+}
+
 async function syncDnrFromStorage(): Promise<void> {
   const settings = await getSettings();
   await applyDnrSetting(settings.enableFrameHeaderRelaxation);
@@ -377,9 +500,15 @@ async function handleSelectionContextMenu(selectionText: string, tab?: chrome.ta
     ? openSidePanel(tab.windowId).catch(() => undefined)
     : Promise.resolve();
   const text = createSelectionPrompt(selectionText);
-  await copyText(text, tab);
-  await flashBadge("Copied");
-  await panelPromise;
+  try {
+    await copyText(text, tab);
+    await flashBadge("Copied").catch(() => undefined);
+  } catch (error) {
+    console.warn("Failed to copy context menu prompt.", error);
+    await flashBadge("Error").catch(() => undefined);
+  } finally {
+    await panelPromise;
+  }
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
@@ -393,6 +522,16 @@ async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
 }
 
 async function ensureOffscreenDocument(): Promise<void> {
+  if (!offscreenDocumentPromise) {
+    offscreenDocumentPromise = createOffscreenDocumentIfNeeded().finally(() => {
+      offscreenDocumentPromise = undefined;
+    });
+  }
+
+  await offscreenDocumentPromise;
+}
+
+async function createOffscreenDocumentIfNeeded(): Promise<void> {
   const documentUrl = chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH);
   const existingContexts = await chrome.runtime.getContexts({
     contextTypes: ["OFFSCREEN_DOCUMENT"],
@@ -409,6 +548,11 @@ async function ensureOffscreenDocument(): Promise<void> {
     justification: "Copy anyside prompts from context menus and extension UI."
   });
 }
+
+export const __testing = {
+  ensureOffscreenDocument,
+  selectAiInputAgent
+};
 
 async function copyText(text: string, tab?: chrome.tabs.Tab): Promise<void> {
   if (tab?.id !== undefined && canInjectIntoTab(tab)) {

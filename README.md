@@ -9,6 +9,7 @@ It displays a local extension page in the Side Panel and loads the selected AI s
 - ChatGPT: `https://chatgpt.com/`
 - Claude: `https://claude.ai/`
 - Gemini: `https://gemini.google.com/`
+- Perplexity: `https://www.perplexity.ai/`
 - NotebookLM: `https://notebooklm.google.com/`
 - Custom URL
 
@@ -69,15 +70,17 @@ Some AI sites block iframe embedding with `X-Frame-Options` or `Content-Security
 - `x-frame-options`
 - `content-security-policy`
 
+The allowlisted request domains are `chatgpt.com`, `claude.ai`, `gemini.google.com`, `www.perplexity.ai`, and `notebooklm.google.com`.
+
 This compatibility mode is intentionally limited:
 
-- It only applies to the allowlisted AI domains.
+- It only applies to the allowlisted built-in AI domains.
 - It only applies to `sub_frame` requests.
 - It does not apply to all URLs.
 - It does not apply to `main_frame` browsing.
 - It is not applied to arbitrary Custom URL domains.
 
-Because DNR rules operate at the browser request level and are not limited to the Side Panel iframe, compatibility mode is off by default. Enabling it is an explicit opt-in from Options or developer diagnostics. Existing stored settings from older builds must opt in again before the ruleset can be enabled.
+Because DNR rules operate at the browser request level and are not limited to the anyside Side Panel iframe, compatibility mode is off by default. While enabled, Chrome can apply this ruleset to any matching subframe request in the browser. Enabling it is an explicit opt-in from Options or developer diagnostics. Existing stored settings from older builds must opt in again before the ruleset can be enabled.
 
 ## Login guidance
 
@@ -89,9 +92,9 @@ If an iframe does not load or login is unreliable, use Open in side window. anys
 
 ## Privacy and safety
 
-- anyside does not send browsing content to any external server.
-- It does not read or manipulate AI service DOMs.
-- It does not auto-type into ChatGPT, Claude, Gemini, NotebookLM, or Keep.
+- anyside does not send browsing content to any external server of its own.
+- Context and Prompt actions run only after a user action, then use the active tab title, URL, and selected text to build the requested text.
+- When an AI input page is connected, anyside may insert that user-requested text into the visible AI input field; otherwise it falls back to copying the text.
 - It does not auto-submit prompts.
 - The context menu only creates a prompt and copies it to your clipboard after a user action.
 
