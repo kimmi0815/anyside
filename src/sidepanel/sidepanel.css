@@ -289,6 +289,21 @@ body {
   margin-left: 4px;
 }
 
+.header-reload-button {
+  width: 28px;
+  height: 28px;
+  margin-left: 4px;
+}
+
+.header-reload-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.app[data-header-collapsed="true"] .header-reload-button {
+  display: none;
+}
+
 .footer-chrome-toggle {
   margin-left: 0;
 }

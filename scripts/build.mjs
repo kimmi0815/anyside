@@ -7,6 +7,7 @@ const root = process.cwd();
 const srcDir = join(root, "src");
 const distDir = join(root, "dist");
 const CONTENT_SCRIPT_ENTRY = "content/aiInputAgent.js";
+const BACKGROUND_ENTRY = "background/service-worker.js";
 
 async function collectTypescriptFiles(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -37,14 +38,20 @@ async function stripTypesBuild() {
     await writeFile(outFile, `${cleanedJs}\n`);
   }
 
-  await bundleContentScript();
+  await bundleClassicScript(CONTENT_SCRIPT_ENTRY, {
+    label: "content script"
+  });
+  await bundleClassicScript(BACKGROUND_ENTRY, {
+    label: "background service worker",
+    footer: "globalThis.__anysideBackgroundTesting = __testing;"
+  });
   console.log(`Built ${files.length} TypeScript files into dist/.`);
 }
 
-async function bundleContentScript() {
-  const contentScriptFiles = await collectModuleGraph(join(distDir, CONTENT_SCRIPT_ENTRY));
+async function bundleClassicScript(entry, options) {
+  const moduleFiles = await collectModuleGraph(join(distDir, entry));
   const chunks = [];
-  for (const modulePath of contentScriptFiles) {
+  for (const modulePath of moduleFiles) {
     const source = await readFile(modulePath, "utf8");
     chunks.push({
       modulePath: relative(distDir, modulePath),
@@ -59,12 +66,13 @@ async function bundleContentScript() {
       `\n  /* ${modulePath} */`,
       indent(source.trim())
     ].join("\n")),
+    options.footer ? indent(`\n${options.footer}`) : "",
     "})();",
     ""
   ].join("\n");
 
-  await writeFile(join(distDir, "content/aiInputAgent.js"), bundled);
-  console.log("Bundled dist/content/aiInputAgent.js for classic content script execution.");
+  await writeFile(join(distDir, entry), bundled);
+  console.log(`Bundled dist/${entry} for classic ${options.label} execution.`);
 }
 
 async function collectModuleGraph(entryPath, seen = new Set(), ordered = []) {
@@ -147,7 +155,13 @@ function indent(source) {
 
 const args = new Set(process.argv.slice(2));
 if (args.has("--bundle-content")) {
-  await bundleContentScript();
+  await bundleClassicScript(CONTENT_SCRIPT_ENTRY, {
+    label: "content script"
+  });
+  await bundleClassicScript(BACKGROUND_ENTRY, {
+    label: "background service worker",
+    footer: "globalThis.__anysideBackgroundTesting = __testing;"
+  });
 } else if (args.has("--strip-types")) {
   await stripTypesBuild();
 } else {

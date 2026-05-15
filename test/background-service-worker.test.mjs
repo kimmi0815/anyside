@@ -112,8 +112,9 @@ test("ensureOffscreenDocument serializes concurrent document creation", async ()
 async function importWorker(options = {}) {
   const chrome = createChromeMock(options);
   globalThis.chrome = chrome;
-  const worker = await import(`../dist/background/service-worker.js?background-${Date.now()}-${importCounter++}`);
+  await import(`../dist/background/service-worker.js?background-${Date.now()}-${importCounter++}`);
   await flushAsync();
+  const worker = { __testing: globalThis.__anysideBackgroundTesting };
   return { worker, chrome };
 }
 

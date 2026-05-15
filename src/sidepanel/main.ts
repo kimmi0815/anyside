@@ -23,6 +23,7 @@ const statusLive = element<HTMLElement>("statusLive");
 const statusBanner = element<HTMLElement>("statusBanner");
 const statusBannerText = element<HTMLElement>("statusBannerText");
 const moreActionsButton = element<HTMLButtonElement>("moreActionsButton");
+const headerReloadButton = element<HTMLButtonElement>("headerReloadButton");
 const headerChromeToggleButton = element<HTMLButtonElement>("headerChromeToggleButton");
 const footerChromeToggleButton = element<HTMLButtonElement>("footerChromeToggleButton");
 const statusText = element<HTMLElement>("statusText");
@@ -169,6 +170,7 @@ function bindEvents(): void {
   fallbackOpenWindowButton.addEventListener("click", () => void openCurrentInFallbackWindow());
   setupOptionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
   moreActionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
+  headerReloadButton.addEventListener("click", () => reloadCurrentUrl());
   headerChromeToggleButton.addEventListener("click", () => {
     void setSidePanelChromeCollapsed("header", !settings.sidePanelChrome.headerCollapsed);
   });
@@ -1143,6 +1145,9 @@ function syncSidePanelChromeUi(): void {
   app.dataset.footerCollapsed = footerCollapsed ? "true" : "false";
   serviceSwitcher.setAttribute("aria-hidden", headerCollapsed ? "true" : "false");
   serviceMenu.setAttribute("aria-hidden", headerCollapsed ? "true" : "false");
+  headerReloadButton.title = "Reload current service";
+  headerReloadButton.setAttribute("aria-label", "Reload current service");
+  headerReloadButton.setAttribute("aria-hidden", headerCollapsed ? "true" : "false");
   composerActions.setAttribute("aria-hidden", footerCollapsed ? "true" : "false");
   moreActionsButton.setAttribute("aria-hidden", footerCollapsed ? "true" : "false");
 

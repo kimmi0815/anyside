@@ -56,6 +56,16 @@ test("manifest content scripts point to classic script artifacts", async () => {
   }
 });
 
+test("manifest background service worker points to a classic script artifact", async () => {
+  const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
+  const serviceWorkerPath = manifest.background?.service_worker;
+
+  assert.equal(serviceWorkerPath, "dist/background/service-worker.js");
+  const source = await readFile(join(root, serviceWorkerPath), "utf8");
+  assert.doesNotMatch(source, /^\s*import\s/m, `${serviceWorkerPath} should not include top-level imports`);
+  assert.doesNotMatch(source, /^\s*export\s/m, `${serviceWorkerPath} should not include top-level exports`);
+});
+
 test("clean build keeps stale dist artifacts out of release zip", async (t) => {
   const tempRoot = await mkdtemp(join(tmpdir(), "anyside-release-"));
   t.after(() => rm(tempRoot, { recursive: true, force: true }));

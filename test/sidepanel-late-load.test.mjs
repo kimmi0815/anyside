@@ -213,6 +213,7 @@ test("side panel service switcher loads registered services and custom URLs", as
     );
     assert.equal(document.getElementById("serviceSwitcher").children[0].dataset.presetId, "claude");
     assert.equal(document.getElementById("moreActionsButton").hidden, false);
+    assert.equal(document.getElementById("headerReloadButton").attributes["aria-label"], "Reload current service");
 
     const claudeButton = document
       .getElementById("serviceSwitcher")
@@ -233,6 +234,9 @@ test("side panel service switcher loads registered services and custom URLs", as
 
     assert.equal(document.getElementById("aiFrame").src, "https://research.example.com/");
     assert.equal(storageData["anyside.settings"].defaultPresetId, "custom:research");
+    document.getElementById("headerReloadButton").dispatch("click");
+    assert.equal(document.getElementById("aiFrame").src, "https://research.example.com/");
+    assert.match(document.getElementById("statusText").textContent, /Loading Research/);
 
     const chatgptButton = document
       .getElementById("serviceSwitcher")
@@ -405,6 +409,7 @@ test("side panel header and footer chrome collapse and persist", async () => {
     assert.equal(storageData["anyside.settings"].sidePanelChrome.headerCollapsed, true);
     assert.equal(app.dataset.headerCollapsed, "true");
     assert.equal(document.getElementById("serviceSwitcher").attributes["aria-hidden"], "true");
+    assert.equal(document.getElementById("headerReloadButton").attributes["aria-hidden"], "true");
     assert.equal(headerToggle.attributes["aria-label"], "Expand header");
 
     headerToggle.dispatch("click");
@@ -412,6 +417,7 @@ test("side panel header and footer chrome collapse and persist", async () => {
 
     assert.equal(storageData["anyside.settings"].sidePanelChrome.headerCollapsed, false);
     assert.equal(app.dataset.headerCollapsed, "false");
+    assert.equal(document.getElementById("headerReloadButton").attributes["aria-hidden"], "false");
 
     document.getElementById("promptButton").dispatch("click");
     assert.equal(promptPalette.hidden, false);
@@ -483,6 +489,7 @@ function createSidepanelDocument() {
     "diagnosticsTable"
   ];
   const buttonIds = [
+    "headerReloadButton",
     "headerChromeToggleButton",
     "footerChromeToggleButton",
     "moreActionsButton",
