@@ -31,12 +31,18 @@ export type DiagnosticEntry = {
   message?: string;
 };
 
+export type SidePanelChromeSettings = {
+  headerCollapsed: boolean;
+  footerCollapsed: boolean;
+};
+
 export type Settings = {
   defaultPresetId: ActivePresetId;
   activePresetId: ActivePresetId;
   customUrls: CustomUrl[];
   serviceOrder: ActivePresetId[];
   hiddenServiceIds: ActivePresetId[];
+  sidePanelChrome: SidePanelChromeSettings;
   lastUrlByPreset: Record<string, string>;
   enableFrameHeaderRelaxation: boolean;
   frameHeaderRelaxationAcknowledged: boolean;

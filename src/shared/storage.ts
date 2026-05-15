@@ -1,5 +1,5 @@
 import { BUILT_IN_PRESETS, CUSTOM_PRESET_ID, DEFAULT_PRESET_ID, isBuiltInPresetId, makeCustomPresetId, parseCustomPresetId } from "./presets.js";
-import type { ActivePresetId, CustomUrl, DiagnosticEntry, DiagnosticStatus, Settings } from "./types.js";
+import type { ActivePresetId, CustomUrl, DiagnosticEntry, DiagnosticStatus, Settings, SidePanelChromeSettings } from "./types.js";
 import { normalizeUserUrl } from "./url.js";
 
 export const SETTINGS_KEY = "anyside.settings";
@@ -21,6 +21,10 @@ export function defaultSettings(): Settings {
     customUrls: [],
     serviceOrder: BUILT_IN_PRESETS.map((preset) => preset.id),
     hiddenServiceIds: [],
+    sidePanelChrome: {
+      headerCollapsed: false,
+      footerCollapsed: false
+    },
     lastUrlByPreset: defaultLastUrlByPreset(),
     enableFrameHeaderRelaxation: false,
     frameHeaderRelaxationAcknowledged: false,
@@ -165,6 +169,20 @@ function normalizeLastUrlByPreset(value: unknown, customUrls: CustomUrl[]): Reco
   return output;
 }
 
+function normalizeSidePanelChrome(value: unknown): SidePanelChromeSettings {
+  if (!isRecord(value)) {
+    return {
+      headerCollapsed: false,
+      footerCollapsed: false
+    };
+  }
+
+  return {
+    headerCollapsed: value.headerCollapsed === true,
+    footerCollapsed: value.footerCollapsed === true
+  };
+}
+
 function isDiagnosticStatus(value: unknown): value is DiagnosticStatus {
   return typeof value === "string" && DIAGNOSTIC_STATUSES.includes(value as DiagnosticStatus);
 }
@@ -259,6 +277,7 @@ export function normalizeSettings(value: unknown): Settings {
     customUrls,
     serviceOrder,
     hiddenServiceIds,
+    sidePanelChrome: normalizeSidePanelChrome(input.sidePanelChrome),
     lastUrlByPreset: normalizeLastUrlByPreset(input.lastUrlByPreset, customUrls),
     enableFrameHeaderRelaxation,
     frameHeaderRelaxationAcknowledged,

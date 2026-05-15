@@ -8,13 +8,16 @@
   </head>
   <body>
     <a class="skip-link" href="#aiFrame">Skip to AI frame</a>
-    <main class="app">
+    <main id="app" class="app">
       <div id="statusLive" class="status-live" role="status" aria-live="polite" aria-atomic="true">
         <span id="statusText">Loading anyside...</span>
       </div>
 
       <section class="service-bar" aria-label="AI services">
         <div id="serviceSwitcher" class="service-switcher" role="tablist" aria-label="Registered AI services"></div>
+        <button id="headerChromeToggleButton" class="icon-button chrome-toggle-button header-chrome-toggle" type="button" aria-label="Collapse header" title="Collapse header">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 9h12"/><path d="m9 14 3 3 3-3"/></svg>
+        </button>
         <div id="serviceMenu" class="service-menu" role="menu" hidden>
           <button id="hideServiceButton" type="button" role="menuitem">Hide from header</button>
         </div>
@@ -88,6 +91,9 @@
         </div>
         <button id="moreActionsButton" class="icon-button settings-button" type="button" aria-label="Open settings" title="Open settings">
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04A1.7 1.7 0 0 0 15 19.37a1.7 1.7 0 0 0-1 .46 1.7 1.7 0 0 0-.5 1.21V21a2 2 0 1 1-4 0v-.06a1.7 1.7 0 0 0-.5-1.21 1.7 1.7 0 0 0-1-.46 1.7 1.7 0 0 0-1.88.34l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-.46-1 1.7 1.7 0 0 0-1.21-.5H3a2 2 0 1 1 0-4h.06a1.7 1.7 0 0 0 1.21-.5 1.7 1.7 0 0 0 .46-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.7 1.7 0 0 0 9 4.63a1.7 1.7 0 0 0 1-.46 1.7 1.7 0 0 0 .5-1.21V3a2 2 0 1 1 4 0v.06a1.7 1.7 0 0 0 .5 1.21 1.7 1.7 0 0 0 1 .46 1.7 1.7 0 0 0 1.88-.34l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.7 1.7 0 0 0 19.37 9c.14.36.31.69.46 1 .31.31.74.5 1.21.5H21a2 2 0 1 1 0 4h-.06a1.7 1.7 0 0 0-1.21.5c-.19.31-.35.64-.46 1Z"/></svg>
+        </button>
+        <button id="footerChromeToggleButton" class="icon-button chrome-toggle-button footer-chrome-toggle" type="button" aria-label="Collapse footer" title="Collapse footer">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 15h12"/><path d="m9 10 3-3 3 3"/></svg>
         </button>
       </section>
 

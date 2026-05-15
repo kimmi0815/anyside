@@ -18,10 +18,13 @@ const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
   notebooklm: "../../assets/service-icons/notebooklm.svg"
 };
 
+const app = element<HTMLElement>("app");
 const statusLive = element<HTMLElement>("statusLive");
 const statusBanner = element<HTMLElement>("statusBanner");
 const statusBannerText = element<HTMLElement>("statusBannerText");
 const moreActionsButton = element<HTMLButtonElement>("moreActionsButton");
+const headerChromeToggleButton = element<HTMLButtonElement>("headerChromeToggleButton");
+const footerChromeToggleButton = element<HTMLButtonElement>("footerChromeToggleButton");
 const statusText = element<HTMLElement>("statusText");
 const loadingSpinner = element<HTMLElement>("loadingSpinner");
 const elapsedText = element<HTMLElement>("elapsedText");
@@ -166,6 +169,12 @@ function bindEvents(): void {
   fallbackOpenWindowButton.addEventListener("click", () => void openCurrentInFallbackWindow());
   setupOptionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
   moreActionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
+  headerChromeToggleButton.addEventListener("click", () => {
+    void setSidePanelChromeCollapsed("header", !settings.sidePanelChrome.headerCollapsed);
+  });
+  footerChromeToggleButton.addEventListener("click", () => {
+    void setSidePanelChromeCollapsed("footer", !settings.sidePanelChrome.footerCollapsed);
+  });
   dismissLayer.addEventListener("click", () => closeComposerMenus());
   bindComposerEvents();
 
@@ -312,8 +321,7 @@ function bindComposerEvents(): void {
   document.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
-      setComposerExpanded(true);
-      openPromptPalette();
+      void openPromptFromShortcut();
       return;
     }
 
@@ -331,10 +339,19 @@ function bindComposerEvents(): void {
 }
 
 function setComposerExpanded(expanded: boolean): void {
-  composerCollapsed = !expanded;
-  composerToolbar.dataset.expanded = expanded ? "true" : "false";
-  composerLauncherButton.setAttribute("aria-expanded", expanded ? "true" : "false");
-  composerActions.setAttribute("aria-hidden", "false");
+  const nextExpanded = expanded && !settings.sidePanelChrome.footerCollapsed;
+  composerCollapsed = !nextExpanded;
+  composerToolbar.dataset.expanded = nextExpanded ? "true" : "false";
+  composerLauncherButton.setAttribute("aria-expanded", nextExpanded ? "true" : "false");
+  composerActions.setAttribute("aria-hidden", settings.sidePanelChrome.footerCollapsed ? "true" : "false");
+}
+
+async function openPromptFromShortcut(): Promise<void> {
+  if (settings.sidePanelChrome.footerCollapsed) {
+    await setSidePanelChromeCollapsed("footer", false);
+  }
+  setComposerExpanded(true);
+  openPromptPalette();
 }
 
 async function toggleContextPopover(): Promise<void> {
@@ -1113,8 +1130,55 @@ function syncSettingsUi(): void {
   const settingsLabel = `Open settings. Frame compatibility mode is ${compatibilityState}.`;
   moreActionsButton.title = settingsLabel;
   moreActionsButton.setAttribute("aria-label", settingsLabel);
+  syncSidePanelChromeUi();
   renderServiceSwitcher();
   renderDiagnostics();
+}
+
+function syncSidePanelChromeUi(): void {
+  const headerCollapsed = settings.sidePanelChrome.headerCollapsed;
+  const footerCollapsed = settings.sidePanelChrome.footerCollapsed;
+
+  app.dataset.headerCollapsed = headerCollapsed ? "true" : "false";
+  app.dataset.footerCollapsed = footerCollapsed ? "true" : "false";
+  serviceSwitcher.setAttribute("aria-hidden", headerCollapsed ? "true" : "false");
+  serviceMenu.setAttribute("aria-hidden", headerCollapsed ? "true" : "false");
+  composerActions.setAttribute("aria-hidden", footerCollapsed ? "true" : "false");
+  moreActionsButton.setAttribute("aria-hidden", footerCollapsed ? "true" : "false");
+
+  const headerLabel = headerCollapsed ? "Expand header" : "Collapse header";
+  headerChromeToggleButton.title = headerLabel;
+  headerChromeToggleButton.setAttribute("aria-label", headerLabel);
+  headerChromeToggleButton.setAttribute("aria-expanded", headerCollapsed ? "false" : "true");
+
+  const footerLabel = footerCollapsed ? "Expand footer" : "Collapse footer";
+  footerChromeToggleButton.title = footerLabel;
+  footerChromeToggleButton.setAttribute("aria-label", footerLabel);
+  footerChromeToggleButton.setAttribute("aria-expanded", footerCollapsed ? "false" : "true");
+}
+
+async function setSidePanelChromeCollapsed(area: "header" | "footer", collapsed: boolean): Promise<void> {
+  const key = area === "header" ? "headerCollapsed" : "footerCollapsed";
+  if (settings.sidePanelChrome[key] === collapsed) {
+    return;
+  }
+
+  if (area === "header" && collapsed) {
+    closeServiceMenu();
+  }
+
+  if (area === "footer" && collapsed) {
+    closeComposerMenus();
+  }
+
+  settings = await saveSettings({
+    ...settings,
+    sidePanelChrome: {
+      ...settings.sidePanelChrome,
+      [key]: collapsed
+    }
+  });
+  syncSettingsUi();
 }
 
 function renderServiceSwitcher(): void {

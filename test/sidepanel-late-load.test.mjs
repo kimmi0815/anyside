@@ -359,10 +359,105 @@ test("side panel composer menus close from toggles and the dismiss layer", async
   }
 });
 
+test("side panel header and footer chrome collapse and persist", async () => {
+  const scheduler = createScheduler();
+  const document = createSidepanelDocument();
+  const storageData = {};
+
+  globalThis.HTMLElement = FakeElement;
+  globalThis.Element = FakeElement;
+  globalThis.Node = FakeElement;
+  globalThis.HTMLButtonElement = FakeButtonElement;
+  globalThis.HTMLDetailsElement = FakeElement;
+  globalThis.HTMLIFrameElement = FakeIFrameElement;
+  globalThis.HTMLInputElement = FakeInputElement;
+  globalThis.HTMLImageElement = FakeImageElement;
+  globalThis.HTMLTableSectionElement = FakeElement;
+  globalThis.document = document;
+  globalThis.window = {
+    location: { search: "" },
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    setInterval: scheduler.setInterval,
+    clearInterval: scheduler.clearInterval
+  };
+  globalThis.chrome = createChromeMock(storageData);
+
+  try {
+    await import(`../dist/sidepanel/main.js?chrome-collapse-${Date.now()}`);
+    await flushAsync();
+
+    const app = document.getElementById("app");
+    const headerToggle = document.getElementById("headerChromeToggleButton");
+    const footerToggle = document.getElementById("footerChromeToggleButton");
+    const toolbar = document.getElementById("composerToolbar");
+    const promptPalette = document.getElementById("promptPalette");
+    const dismissLayer = document.getElementById("dismissLayer");
+
+    assert.equal(app.dataset.headerCollapsed, "false");
+    assert.equal(app.dataset.footerCollapsed, "false");
+    assert.equal(headerToggle.attributes["aria-label"], "Collapse header");
+    assert.equal(footerToggle.attributes["aria-label"], "Collapse footer");
+
+    headerToggle.dispatch("click");
+    await flushAsync();
+
+    assert.equal(storageData["anyside.settings"].sidePanelChrome.headerCollapsed, true);
+    assert.equal(app.dataset.headerCollapsed, "true");
+    assert.equal(document.getElementById("serviceSwitcher").attributes["aria-hidden"], "true");
+    assert.equal(headerToggle.attributes["aria-label"], "Expand header");
+
+    headerToggle.dispatch("click");
+    await flushAsync();
+
+    assert.equal(storageData["anyside.settings"].sidePanelChrome.headerCollapsed, false);
+    assert.equal(app.dataset.headerCollapsed, "false");
+
+    document.getElementById("promptButton").dispatch("click");
+    assert.equal(promptPalette.hidden, false);
+    assert.equal(dismissLayer.hidden, false);
+
+    footerToggle.dispatch("click");
+    await flushAsync();
+
+    assert.equal(storageData["anyside.settings"].sidePanelChrome.footerCollapsed, true);
+    assert.equal(app.dataset.footerCollapsed, "true");
+    assert.equal(promptPalette.hidden, true);
+    assert.equal(dismissLayer.hidden, true);
+    assert.equal(toolbar.dataset.expanded, "false");
+    assert.equal(document.getElementById("composerActions").attributes["aria-hidden"], "true");
+    assert.equal(document.getElementById("moreActionsButton").attributes["aria-hidden"], "true");
+    assert.equal(footerToggle.attributes["aria-label"], "Expand footer");
+
+    footerToggle.dispatch("click");
+    await flushAsync();
+
+    assert.equal(storageData["anyside.settings"].sidePanelChrome.footerCollapsed, false);
+    assert.equal(app.dataset.footerCollapsed, "false");
+    assert.equal(document.getElementById("composerActions").attributes["aria-hidden"], "false");
+    assert.equal(document.getElementById("moreActionsButton").attributes["aria-hidden"], "false");
+    assert.equal(footerToggle.attributes["aria-label"], "Collapse footer");
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.document;
+    delete globalThis.window;
+    delete globalThis.HTMLElement;
+    delete globalThis.Element;
+    delete globalThis.Node;
+    delete globalThis.HTMLButtonElement;
+    delete globalThis.HTMLDetailsElement;
+    delete globalThis.HTMLIFrameElement;
+    delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLImageElement;
+    delete globalThis.HTMLTableSectionElement;
+  }
+});
+
 
 function createSidepanelDocument() {
   const document = new FakeDocument();
   const elementIds = [
+    "app",
     "statusLive",
     "statusBanner",
     "statusBannerText",
@@ -388,6 +483,8 @@ function createSidepanelDocument() {
     "diagnosticsTable"
   ];
   const buttonIds = [
+    "headerChromeToggleButton",
+    "footerChromeToggleButton",
     "moreActionsButton",
     "hideServiceButton",
     "composerLauncherButton",

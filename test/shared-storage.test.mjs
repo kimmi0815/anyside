@@ -79,6 +79,10 @@ test("normalizeSettings keeps valid custom settings and drops invalid entries", 
   ]);
   assert.deepEqual(settings.serviceOrder, ["custom:docs", "chatgpt", "claude", "gemini", "perplexity", "notebooklm"]);
   assert.deepEqual(settings.hiddenServiceIds, ["gemini"]);
+  assert.deepEqual(settings.sidePanelChrome, {
+    headerCollapsed: false,
+    footerCollapsed: false
+  });
   assert.equal(settings.lastUrlByPreset.chatgpt, "https://chatgpt.com/");
   assert.equal(settings.lastUrlByPreset.keep, undefined);
   assert.equal(settings.lastUrlByPreset.custom, "");
@@ -113,12 +117,36 @@ test("normalizeSettings migrates removed Keep selections and invalid icon URLs",
   assert.deepEqual(settings.hiddenServiceIds, []);
 });
 
+test("normalizeSettings keeps valid side panel chrome settings and drops invalid values", () => {
+  assert.deepEqual(normalizeSettings({}).sidePanelChrome, {
+    headerCollapsed: false,
+    footerCollapsed: false
+  });
+
+  assert.deepEqual(
+    normalizeSettings({
+      sidePanelChrome: {
+        headerCollapsed: true,
+        footerCollapsed: "yes"
+      }
+    }).sidePanelChrome,
+    {
+      headerCollapsed: true,
+      footerCollapsed: false
+    }
+  );
+});
+
 test("frame header relaxation is off by default and old implicit true settings must opt in again", () => {
   const defaults = defaultSettings();
   assert.equal(defaults.enableFrameHeaderRelaxation, false);
   assert.equal(defaults.frameHeaderRelaxationAcknowledged, false);
   assert.deepEqual(defaults.serviceOrder, ["chatgpt", "claude", "gemini", "perplexity", "notebooklm"]);
   assert.deepEqual(defaults.hiddenServiceIds, []);
+  assert.deepEqual(defaults.sidePanelChrome, {
+    headerCollapsed: false,
+    footerCollapsed: false
+  });
 
   const legacyImplicit = normalizeSettings({
     enableFrameHeaderRelaxation: true
