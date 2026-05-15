@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title">
+  <title id="title">NotebookLM</title>
+  <rect width="48" height="48" rx="10" fill="#f8fafc"/>
+  <path fill="#334155" d="M13 9.5h18.5a4 4 0 0 1 4 4v21a4 4 0 0 1-4 4H13a2.5 2.5 0 0 1-2.5-2.5V12A2.5 2.5 0 0 1 13 9.5Z"/>
+  <path fill="#e2e8f0" d="M15 13h16.5a1 1 0 0 1 1 1v20.5a1 1 0 0 1-1 1H15.25a1.75 1.75 0 0 1-1.75-1.75V14.5A1.5 1.5 0 0 1 15 13Z"/>
+  <path fill="#64748b" d="M17.5 18h11v2.5h-11V18Zm0 5.25h11v2.5h-11v-2.5Zm0 5.25h8v2.5h-8v-2.5Z"/>
+  <path fill="#334155" d="M35.5 17.5h2v16h-2z"/>
+  <path fill="#0f172a" d="M35.5 17.5h2l-1 3-1-3Z"/>
+  <path fill="#64748b" d="M13.5 34.25c0-.69.56-1.25 1.25-1.25H33v2.5H14.75c-.69 0-1.25-.56-1.25-1.25Z"/>
+</svg>

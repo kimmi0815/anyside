@@ -6,6 +6,7 @@ export const SETTINGS_KEY = "anyside.settings";
 export const FALLBACK_WINDOW_KEY = "anyside.fallbackWindow";
 
 const LEGACY_SETTINGS_KEY = "aiSidecar.settings";
+const REMOVED_PRESET_IDS = new Set(["keep"]);
 
 function defaultLastUrlByPreset(): Record<string, string> {
   const entries = BUILT_IN_PRESETS.map((preset) => [preset.id, preset.url]);
@@ -18,6 +19,8 @@ export function defaultSettings(): Settings {
     defaultPresetId: DEFAULT_PRESET_ID,
     activePresetId: DEFAULT_PRESET_ID,
     customUrls: [],
+    serviceOrder: BUILT_IN_PRESETS.map((preset) => preset.id),
+    hiddenServiceIds: [],
     lastUrlByPreset: defaultLastUrlByPreset(),
     enableFrameHeaderRelaxation: false,
     frameHeaderRelaxationAcknowledged: false,
@@ -55,12 +58,21 @@ function normalizeCustomUrls(value: unknown): CustomUrl[] {
     }
 
     seenIds.add(id);
-    customUrls.push({
+    const customUrl: CustomUrl = {
       id,
       label: typeof item.label === "string" && item.label.trim() ? item.label.trim() : url,
       url,
       createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now()
-    });
+    };
+    const iconUrl = typeof item.iconUrl === "string" ? normalizeIconUrl(item.iconUrl, url) : undefined;
+    if (iconUrl) {
+      customUrl.iconUrl = iconUrl;
+      if (typeof item.iconUpdatedAt === "number") {
+        customUrl.iconUpdatedAt = item.iconUpdatedAt;
+      }
+    }
+
+    customUrls.push(customUrl);
   }
 
   return customUrls;
@@ -68,6 +80,10 @@ function normalizeCustomUrls(value: unknown): CustomUrl[] {
 
 function isKnownActivePresetId(value: unknown, customUrls: CustomUrl[]): value is ActivePresetId {
   if (typeof value !== "string") {
+    return false;
+  }
+
+  if (REMOVED_PRESET_IDS.has(value)) {
     return false;
   }
 
@@ -81,6 +97,53 @@ function isKnownActivePresetId(value: unknown, customUrls: CustomUrl[]): value i
 
 function normalizeActivePresetId(value: unknown, fallback: ActivePresetId, customUrls: CustomUrl[]): ActivePresetId {
   return isKnownActivePresetId(value, customUrls) ? value : fallback;
+}
+
+function knownServiceIds(customUrls: CustomUrl[]): ActivePresetId[] {
+  return [
+    ...BUILT_IN_PRESETS.map((preset) => preset.id),
+    ...customUrls.map((customUrl) => makeCustomPresetId(customUrl.id))
+  ];
+}
+
+function normalizeServiceIdList(value: unknown, customUrls: CustomUrl[], options: { appendMissing: boolean }): ActivePresetId[] {
+  const knownIds = knownServiceIds(customUrls);
+  const knownSet = new Set<ActivePresetId>(knownIds);
+  const output: ActivePresetId[] = [];
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === "string" && knownSet.has(item as ActivePresetId) && !output.includes(item as ActivePresetId)) {
+        output.push(item as ActivePresetId);
+      }
+    }
+  }
+
+  if (options.appendMissing) {
+    for (const id of knownIds) {
+      if (!output.includes(id)) {
+        output.push(id);
+      }
+    }
+  }
+
+  return output;
+}
+
+function ensureVisibleActivePreset(
+  activePresetId: ActivePresetId,
+  defaultPresetId: ActivePresetId,
+  hiddenServiceIds: ActivePresetId[],
+  serviceOrder: ActivePresetId[]
+): { activePresetId: ActivePresetId; defaultPresetId: ActivePresetId } {
+  const visibleIds = serviceOrder.filter((id) => !hiddenServiceIds.includes(id));
+  const fallback = visibleIds[0] || DEFAULT_PRESET_ID;
+  const nextDefaultPresetId = hiddenServiceIds.includes(defaultPresetId) ? fallback : defaultPresetId;
+  const nextActivePresetId = hiddenServiceIds.includes(activePresetId) ? nextDefaultPresetId : activePresetId;
+  return {
+    activePresetId: nextActivePresetId,
+    defaultPresetId: nextDefaultPresetId
+  };
 }
 
 function normalizeLastUrlByPreset(value: unknown, customUrls: CustomUrl[]): Record<string, string> {
@@ -104,6 +167,31 @@ function normalizeLastUrlByPreset(value: unknown, customUrls: CustomUrl[]): Reco
 
 function isDiagnosticStatus(value: unknown): value is DiagnosticStatus {
   return typeof value === "string" && DIAGNOSTIC_STATUSES.includes(value as DiagnosticStatus);
+}
+
+function normalizeIconUrl(value: string, baseUrl: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  try {
+    const parsed = new URL(trimmed, baseUrl);
+    if (parsed.protocol === "https:") {
+      return parsed.href;
+    }
+    if (parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")) {
+      return parsed.href;
+    }
+  } catch {
+    // Invalid icon URLs are ignored; the UI falls back to an initial badge.
+  }
+
+  return undefined;
 }
 
 function normalizeDiagnostics(value: unknown): Record<string, DiagnosticEntry> {
@@ -152,6 +240,12 @@ export function normalizeSettings(value: unknown): Settings {
   const customUrls = normalizeCustomUrls(input.customUrls);
   const defaultPresetId = normalizeActivePresetId(input.defaultPresetId, defaults.defaultPresetId, customUrls);
   const activePresetId = normalizeActivePresetId(input.activePresetId, defaultPresetId, customUrls);
+  const serviceOrder = normalizeServiceIdList(input.serviceOrder, customUrls, { appendMissing: true });
+  let hiddenServiceIds = normalizeServiceIdList(input.hiddenServiceIds, customUrls, { appendMissing: false });
+  if (serviceOrder.every((id) => hiddenServiceIds.includes(id))) {
+    hiddenServiceIds = hiddenServiceIds.filter((id) => id !== DEFAULT_PRESET_ID);
+  }
+  const visibleActive = ensureVisibleActivePreset(activePresetId, defaultPresetId, hiddenServiceIds, serviceOrder);
   const frameHeaderRelaxationAcknowledged = input.frameHeaderRelaxationAcknowledged === true;
   const enableFrameHeaderRelaxation = input.enableFrameHeaderRelaxation === true && frameHeaderRelaxationAcknowledged;
   const frameHeaderRelaxationChangeId =
@@ -160,9 +254,11 @@ export function normalizeSettings(value: unknown): Settings {
       : undefined;
 
   return {
-    defaultPresetId,
-    activePresetId,
+    defaultPresetId: visibleActive.defaultPresetId,
+    activePresetId: visibleActive.activePresetId,
     customUrls,
+    serviceOrder,
+    hiddenServiceIds,
     lastUrlByPreset: normalizeLastUrlByPreset(input.lastUrlByPreset, customUrls),
     enableFrameHeaderRelaxation,
     frameHeaderRelaxationAcknowledged,

@@ -10,7 +10,6 @@ It displays a local extension page in the Side Panel and loads the selected AI s
 - Claude: `https://claude.ai/`
 - Gemini: `https://gemini.google.com/`
 - NotebookLM: `https://notebooklm.google.com/`
-- Google Keep: `https://keep.google.com/`
 - Custom URL
 
 ## Build

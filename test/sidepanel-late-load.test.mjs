@@ -7,6 +7,8 @@ test("side panel hides fallback when the iframe loads after the normal timeout",
   const storageData = {};
 
   globalThis.HTMLElement = FakeElement;
+  globalThis.Element = FakeElement;
+  globalThis.Node = FakeElement;
   globalThis.HTMLButtonElement = FakeButtonElement;
   globalThis.HTMLDetailsElement = FakeElement;
   globalThis.HTMLIFrameElement = FakeIFrameElement;
@@ -76,6 +78,8 @@ test("side panel hides fallback when the iframe loads after the normal timeout",
     delete globalThis.document;
     delete globalThis.window;
     delete globalThis.HTMLElement;
+    delete globalThis.Element;
+    delete globalThis.Node;
     delete globalThis.HTMLButtonElement;
     delete globalThis.HTMLDetailsElement;
     delete globalThis.HTMLIFrameElement;
@@ -102,6 +106,8 @@ test("side panel prompt palette includes custom prompt templates from storage", 
   };
 
   globalThis.HTMLElement = FakeElement;
+  globalThis.Element = FakeElement;
+  globalThis.Node = FakeElement;
   globalThis.HTMLButtonElement = FakeButtonElement;
   globalThis.HTMLDetailsElement = FakeElement;
   globalThis.HTMLIFrameElement = FakeIFrameElement;
@@ -133,6 +139,8 @@ test("side panel prompt palette includes custom prompt templates from storage", 
     delete globalThis.document;
     delete globalThis.window;
     delete globalThis.HTMLElement;
+    delete globalThis.Element;
+    delete globalThis.Node;
     delete globalThis.HTMLButtonElement;
     delete globalThis.HTMLDetailsElement;
     delete globalThis.HTMLIFrameElement;
@@ -141,12 +149,40 @@ test("side panel prompt palette includes custom prompt templates from storage", 
   }
 });
 
-test("side panel URL field loads a user-entered URL and rejects invalid input", async () => {
+test("side panel service switcher loads registered services and custom URLs", async () => {
   const scheduler = createScheduler();
   const document = createSidepanelDocument();
-  const storageData = {};
+  const storageData = {
+    "anyside.settings": {
+      defaultPresetId: "chatgpt",
+      activePresetId: "chatgpt",
+      customUrls: [
+        {
+          id: "research",
+          label: "Research",
+          url: "https://research.example.com/",
+          createdAt: 1
+        }
+      ],
+      lastUrlByPreset: {
+        chatgpt: "https://chatgpt.com/",
+        claude: "https://claude.ai/",
+        gemini: "https://gemini.google.com/",
+        notebooklm: "https://notebooklm.google.com/",
+        custom: "",
+        "custom:research": "https://research.example.com/"
+      },
+      serviceOrder: ["claude", "chatgpt", "custom:research", "gemini", "notebooklm"],
+      hiddenServiceIds: [],
+      enableFrameHeaderRelaxation: false,
+      frameHeaderRelaxationAcknowledged: false,
+      diagnostics: {}
+    }
+  };
 
   globalThis.HTMLElement = FakeElement;
+  globalThis.Element = FakeElement;
+  globalThis.Node = FakeElement;
   globalThis.HTMLButtonElement = FakeButtonElement;
   globalThis.HTMLDetailsElement = FakeElement;
   globalThis.HTMLIFrameElement = FakeIFrameElement;
@@ -163,32 +199,148 @@ test("side panel URL field loads a user-entered URL and rejects invalid input", 
   globalThis.chrome = createChromeMock(storageData);
 
   try {
-    await import(`../dist/sidepanel/main.js?manual-url-${Date.now()}`);
+    await import(`../dist/sidepanel/main.js?service-switcher-${Date.now()}`);
     await flushAsync();
 
-    const input = document.getElementById("currentUrlInput");
-    input.value = "example.com/docs";
-    input.dispatch("keydown", { key: "Enter" });
+    assert.match(textTree(document.getElementById("serviceSwitcher")), /ChatGPT/);
+    assert.match(textTree(document.getElementById("serviceSwitcher")), /Research/);
+    assert.doesNotMatch(textTree(document.getElementById("serviceSwitcher")), /Google Keep/);
+    assert.deepEqual(
+      document.getElementById("serviceSwitcher").children.map((child) => child.dataset.presetId),
+      ["claude", "chatgpt", "custom:research", "gemini", "notebooklm"]
+    );
+    assert.equal(document.getElementById("serviceSwitcher").children[0].dataset.presetId, "claude");
+    assert.equal(document.getElementById("moreActionsButton").hidden, false);
+
+    const claudeButton = document
+      .getElementById("serviceSwitcher")
+      .children.find((child) => child.dataset.presetId === "claude");
+    document.getElementById("serviceSwitcher").dispatch("click", { target: claudeButton });
+    await flushAsync();
     scheduler.runByDelay(0);
 
-    assert.equal(input.value, "https://example.com/docs");
-    assert.equal(document.getElementById("aiFrame").src, "https://example.com/docs");
-    assert.match(document.getElementById("statusText").textContent, /Loading example\.com/);
+    assert.equal(document.getElementById("aiFrame").src, "https://claude.ai/");
+    assert.equal(storageData["anyside.settings"].defaultPresetId, "claude");
+    assert.match(document.getElementById("statusText").textContent, /Loading Claude/);
 
-    input.value = "javascript:alert(1)";
-    input.dispatch("keydown", { key: "Enter" });
+    const customButton = document
+      .getElementById("serviceSwitcher")
+      .children.find((child) => child.dataset.presetId === "custom:research");
+    document.getElementById("serviceSwitcher").dispatch("click", { target: customButton });
+    await flushAsync();
 
-    assert.equal(document.getElementById("aiFrame").src, "https://example.com/docs");
-    assert.match(document.getElementById("statusText").textContent, /valid HTTPS URL/);
+    assert.equal(document.getElementById("aiFrame").src, "https://research.example.com/");
+    assert.equal(storageData["anyside.settings"].defaultPresetId, "custom:research");
+
+    const chatgptButton = document
+      .getElementById("serviceSwitcher")
+      .children.find((child) => child.dataset.presetId === "chatgpt");
+    document.getElementById("serviceSwitcher").dispatch("dragstart", {
+      target: chatgptButton,
+      dataTransfer: createDataTransfer()
+    });
+    document.getElementById("serviceSwitcher").dispatch("drop", {
+      target: customButton,
+      dataTransfer: createDataTransfer()
+    });
+    await flushAsync();
+
+    assert.deepEqual(storageData["anyside.settings"].serviceOrder.slice(0, 3), ["claude", "custom:research", "chatgpt"]);
+
+    document.getElementById("serviceSwitcher").dispatch("contextmenu", {
+      target: customButton,
+      preventDefault() {}
+    });
+    assert.equal(document.getElementById("serviceMenu").hidden, false);
+    document.getElementById("hideServiceButton").dispatch("click");
+    await flushAsync();
+
+    assert.equal(storageData["anyside.settings"].hiddenServiceIds.includes("custom:research"), true);
+    assert.doesNotMatch(textTree(document.getElementById("serviceSwitcher")), /Research/);
   } finally {
     delete globalThis.chrome;
     delete globalThis.document;
     delete globalThis.window;
     delete globalThis.HTMLElement;
+    delete globalThis.Element;
+    delete globalThis.Node;
     delete globalThis.HTMLButtonElement;
     delete globalThis.HTMLDetailsElement;
     delete globalThis.HTMLIFrameElement;
     delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLTableSectionElement;
+  }
+});
+
+test("side panel composer menus close from toggles and the dismiss layer", async () => {
+  const scheduler = createScheduler();
+  const document = createSidepanelDocument();
+  const storageData = {};
+
+  globalThis.HTMLElement = FakeElement;
+  globalThis.Element = FakeElement;
+  globalThis.Node = FakeElement;
+  globalThis.HTMLButtonElement = FakeButtonElement;
+  globalThis.HTMLDetailsElement = FakeElement;
+  globalThis.HTMLIFrameElement = FakeIFrameElement;
+  globalThis.HTMLInputElement = FakeInputElement;
+  globalThis.HTMLImageElement = FakeImageElement;
+  globalThis.HTMLTableSectionElement = FakeElement;
+  globalThis.document = document;
+  globalThis.window = {
+    location: { search: "" },
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    setInterval: scheduler.setInterval,
+    clearInterval: scheduler.clearInterval
+  };
+  globalThis.chrome = createChromeMock(storageData);
+
+  try {
+    await import(`../dist/sidepanel/main.js?composer-close-${Date.now()}`);
+    await flushAsync();
+
+    const toolbar = document.getElementById("composerToolbar");
+    const promptPalette = document.getElementById("promptPalette");
+    const contextPopover = document.getElementById("contextPopover");
+    const dismissLayer = document.getElementById("dismissLayer");
+
+    document.getElementById("promptButton").dispatch("click");
+    assert.equal(promptPalette.hidden, false);
+    assert.equal(dismissLayer.hidden, false);
+
+    document.getElementById("promptButton").dispatch("click");
+    assert.equal(promptPalette.hidden, true);
+    assert.equal(toolbar.dataset.expanded, "false");
+    assert.equal(dismissLayer.hidden, true);
+
+    document.getElementById("contextButton").dispatch("click");
+    await flushAsync();
+    assert.equal(contextPopover.hidden, false);
+    assert.equal(dismissLayer.hidden, false);
+
+    document.getElementById("contextButton").dispatch("click");
+    assert.equal(contextPopover.hidden, true);
+    assert.equal(toolbar.dataset.expanded, "false");
+
+    document.getElementById("promptButton").dispatch("click");
+    assert.equal(promptPalette.hidden, false);
+    dismissLayer.dispatch("click");
+    assert.equal(promptPalette.hidden, true);
+    assert.equal(toolbar.dataset.expanded, "false");
+    assert.equal(dismissLayer.hidden, true);
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.document;
+    delete globalThis.window;
+    delete globalThis.HTMLElement;
+    delete globalThis.Element;
+    delete globalThis.Node;
+    delete globalThis.HTMLButtonElement;
+    delete globalThis.HTMLDetailsElement;
+    delete globalThis.HTMLIFrameElement;
+    delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLImageElement;
     delete globalThis.HTMLTableSectionElement;
   }
 });
@@ -208,6 +360,9 @@ function createSidepanelDocument() {
     "fallbackReason",
     "setupPanel",
     "composerToast",
+    "serviceSwitcher",
+    "serviceMenu",
+    "dismissLayer",
     "composerToolbar",
     "composerActions",
     "contextPopover",
@@ -219,8 +374,8 @@ function createSidepanelDocument() {
     "diagnosticsTable"
   ];
   const buttonIds = [
-    "reloadButton",
     "moreActionsButton",
+    "hideServiceButton",
     "composerLauncherButton",
     "contextButton",
     "promptButton",
@@ -236,9 +391,23 @@ function createSidepanelDocument() {
   for (const id of buttonIds) {
     document.register(new FakeButtonElement(id, document));
   }
-  document.register(new FakeInputElement("currentUrlInput", document));
   document.register(new FakeInputElement("promptSearchInput", document));
   document.register(new FakeIFrameElement("aiFrame", document));
+  for (const id of [
+    "statusBanner",
+    "loadingSpinner",
+    "elapsedText",
+    "fallbackPanel",
+    "setupPanel",
+    "composerToast",
+    "dismissLayer",
+    "serviceMenu",
+    "contextPopover",
+    "promptPalette",
+    "diagnosticsDetails"
+  ]) {
+    document.getElementById(id).hidden = true;
+  }
   return document;
 }
 
@@ -316,6 +485,20 @@ function createScheduler() {
   };
 }
 
+function createDataTransfer() {
+  return {
+    data: {},
+    dropEffect: "",
+    effectAllowed: "",
+    setData(type, value) {
+      this.data[type] = value;
+    },
+    getData(type) {
+      return this.data[type] || "";
+    }
+  };
+}
+
 class FakeDocument {
   elements = {};
   listeners = {};
@@ -332,6 +515,9 @@ class FakeDocument {
   createElement(tagName) {
     if (tagName === "button") {
       return new FakeButtonElement("", this);
+    }
+    if (tagName === "img") {
+      return new FakeImageElement("", this);
     }
     if (tagName === "input") {
       return new FakeInputElement("", this);
@@ -360,11 +546,20 @@ class FakeElement {
   dataset = {};
   hidden = false;
   listeners = {};
-  textContent = "";
 
   constructor(id, ownerDocument) {
     this.id = id;
     this.ownerDocument = ownerDocument;
+    this._textContent = "";
+  }
+
+  get textContent() {
+    return this._textContent;
+  }
+
+  set textContent(value) {
+    this._textContent = String(value);
+    this.children = [];
   }
 
   addEventListener(type, callback) {
@@ -373,11 +568,43 @@ class FakeElement {
   }
 
   append(...children) {
+    for (const child of children) {
+      if (child && typeof child === "object") {
+        child.parentElement = this;
+      }
+    }
     this.children.push(...children);
   }
 
   contains(target) {
-    return target === this || this.children.includes(target);
+    return target === this || this.children.some((child) => child === target || child.contains?.(target));
+  }
+
+  closest(selector) {
+    if (selector === "button[data-preset-id]" && this instanceof FakeButtonElement && this.dataset.presetId) {
+      return this;
+    }
+    if (selector === "button[data-mode]" && this instanceof FakeButtonElement && this.dataset.mode) {
+      return this;
+    }
+    if (selector === "[data-template-id]" && this.dataset.templateId) {
+      return this;
+    }
+    return this.parentElement?.closest?.(selector) ?? null;
+  }
+
+  querySelectorAll(selector) {
+    const matches = [];
+    const visit = (element) => {
+      if (selector === "[data-dragging]" && element.dataset.dragging !== undefined) {
+        matches.push(element);
+      }
+      for (const child of element.children) {
+        visit(child);
+      }
+    };
+    visit(this);
+    return matches;
   }
 
   cloneNode() {
@@ -408,6 +635,11 @@ class FakeButtonElement extends FakeElement {
 class FakeInputElement extends FakeElement {
   title = "";
   value = "";
+}
+
+class FakeImageElement extends FakeElement {
+  alt = "";
+  src = "";
 }
 
 class FakeIFrameElement extends FakeElement {

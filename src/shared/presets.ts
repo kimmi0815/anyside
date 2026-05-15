@@ -4,8 +4,7 @@ export const BUILT_IN_PRESETS: BuiltInPreset[] = [
   { id: "chatgpt", label: "ChatGPT", url: "https://chatgpt.com/" },
   { id: "claude", label: "Claude", url: "https://claude.ai/" },
   { id: "gemini", label: "Gemini", url: "https://gemini.google.com/" },
-  { id: "notebooklm", label: "NotebookLM", url: "https://notebooklm.google.com/" },
-  { id: "keep", label: "Google Keep", url: "https://keep.google.com/" }
+  { id: "notebooklm", label: "NotebookLM", url: "https://notebooklm.google.com/" }
 ];
 
 export const DEFAULT_PRESET_ID: PresetId = "chatgpt";

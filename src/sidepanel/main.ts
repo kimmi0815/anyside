@@ -1,8 +1,7 @@
 import { Messages } from "../shared/messages.js";
 import { CONTEXT_ACTIONS, PROMPT_TEMPLATES, detectAIService, renderContextTemplate, renderPromptTemplate } from "../features/composer/index.js";
-import { BUILT_IN_PRESETS, diagnosticKey, resolveTarget } from "../shared/presets.js";
+import { BUILT_IN_PRESETS, diagnosticKey, makeCustomPresetId, resolveTarget } from "../shared/presets.js";
 import { getSettings, normalizeSettings, saveSettings, SETTINGS_KEY } from "../shared/storage.js";
-import { labelFromUrl, normalizeUserUrl } from "../shared/url.js";
 import { CUSTOM_PROMPT_TEMPLATES_KEY, getCustomPromptTemplates } from "../storage/promptTemplateStorage.js";
 import type { AIService, ContextMode, PageContext, PromptTemplate } from "../features/composer/types.js";
 import type { ActivePresetId, DiagnosticEntry, DiagnosticStatus, PresetId, RuntimeMessage, RuntimeResponse, Settings } from "../shared/types.js";
@@ -11,17 +10,25 @@ const LOAD_NOTICE_MS = 4500;
 const LOAD_TIMEOUT_MS = 8000;
 const TOAST_MS = 2200;
 const RECENT_PROMPTS_KEY = "composer.recentPromptTemplateIds";
+const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
+  chatgpt: "../../assets/service-icons/chatgpt.svg",
+  claude: "../../assets/service-icons/claude.png",
+  gemini: "../../assets/service-icons/gemini.png",
+  notebooklm: "../../assets/service-icons/notebooklm.svg"
+};
 
 const statusLive = element<HTMLElement>("statusLive");
 const statusBanner = element<HTMLElement>("statusBanner");
 const statusBannerText = element<HTMLElement>("statusBannerText");
-const reloadButton = element<HTMLButtonElement>("reloadButton");
 const moreActionsButton = element<HTMLButtonElement>("moreActionsButton");
 const statusText = element<HTMLElement>("statusText");
 const loadingSpinner = element<HTMLElement>("loadingSpinner");
 const elapsedText = element<HTMLElement>("elapsedText");
-const currentUrlInput = element<HTMLInputElement>("currentUrlInput");
+const serviceSwitcher = element<HTMLElement>("serviceSwitcher");
+const serviceMenu = element<HTMLElement>("serviceMenu");
+const hideServiceButton = element<HTMLButtonElement>("hideServiceButton");
 let aiFrame = element<HTMLIFrameElement>("aiFrame");
+const dismissLayer = element<HTMLButtonElement>("dismissLayer");
 const fallbackPanel = element<HTMLElement>("fallbackPanel");
 const fallbackServiceName = element<HTMLElement>("fallbackServiceName");
 const fallbackReason = element<HTMLElement>("fallbackReason");
@@ -48,6 +55,7 @@ const diagnosticsEnabled = isDebugMode();
 
 type StatusTone = "idle" | "loading" | "success" | "warning" | "error" | "diagnostic";
 type DisplayTarget = { id: ActivePresetId; label: string; url: string };
+type ServiceOption = DisplayTarget & { iconSrc?: string; isCustom: boolean };
 type LoadOptions = { diagnostic?: { dnrEnabled: boolean } };
 type ActiveDiagnostic = {
   key: string;
@@ -79,6 +87,8 @@ let activePromptIndex = 0;
 let toastTimer: number | undefined;
 let composerCollapsed = true;
 let promptTemplates: PromptTemplate[] = [...PROMPT_TEMPLATES];
+let draggedServiceId: ActivePresetId | null = null;
+let menuServiceId: ActivePresetId | null = null;
 
 void init();
 
@@ -93,19 +103,69 @@ async function init(): Promise<void> {
 }
 
 function bindEvents(): void {
-  reloadButton.addEventListener("click", () => loadUrlFromInput());
-  currentUrlInput.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") {
+  serviceSwitcher.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-preset-id]") : null;
+    if (!target) {
+      return;
+    }
+    closeServiceMenu();
+    void selectService(target.dataset.presetId || "");
+  });
+  serviceSwitcher.addEventListener("contextmenu", (event) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-preset-id]") : null;
+    if (!target) {
       return;
     }
     event.preventDefault();
-    loadUrlFromInput();
+    openServiceMenu(target.dataset.presetId || "");
+  });
+  serviceSwitcher.addEventListener("dragstart", (event) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-preset-id]") : null;
+    if (!target) {
+      return;
+    }
+    draggedServiceId = target.dataset.presetId as ActivePresetId;
+    target.dataset.dragging = "true";
+    event.dataTransfer?.setData("text/plain", draggedServiceId);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
+  });
+  serviceSwitcher.addEventListener("dragend", () => {
+    draggedServiceId = null;
+    for (const button of Array.from(serviceSwitcher.querySelectorAll<HTMLButtonElement>("[data-dragging]"))) {
+      delete button.dataset.dragging;
+    }
+  });
+  serviceSwitcher.addEventListener("dragover", (event) => {
+    if (!draggedServiceId) {
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+  });
+  serviceSwitcher.addEventListener("drop", (event) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-preset-id]") : null;
+    if (!target || !draggedServiceId) {
+      return;
+    }
+    event.preventDefault();
+    void moveService(draggedServiceId, target.dataset.presetId || "");
+  });
+  hideServiceButton.addEventListener("click", () => {
+    if (!menuServiceId) {
+      return;
+    }
+    void hideService(menuServiceId);
   });
   fallbackReloadButton.addEventListener("click", () => reloadCurrentUrl());
   fallbackOpenTabButton.addEventListener("click", () => void openCurrentInTab());
   fallbackOpenWindowButton.addEventListener("click", () => void openCurrentInFallbackWindow());
   setupOptionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
   moreActionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
+  dismissLayer.addEventListener("click", () => closeComposerMenus());
   bindComposerEvents();
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -197,7 +257,6 @@ function bindComposerEvents(): void {
   });
   contextButton.addEventListener("click", (event) => {
     event.stopPropagation();
-    setComposerExpanded(true);
     void toggleContextPopover();
   });
   contextActions.addEventListener("click", (event) => {
@@ -210,6 +269,10 @@ function bindComposerEvents(): void {
 
   promptButton.addEventListener("click", (event) => {
     event.stopPropagation();
+    if (!promptPalette.hidden) {
+      closeComposerMenus();
+      return;
+    }
     setComposerExpanded(true);
     openPromptPalette();
   });
@@ -231,6 +294,9 @@ function bindComposerEvents(): void {
     if (!(target instanceof Node)) {
       return;
     }
+    if (!serviceMenu.contains(target)) {
+      closeServiceMenu();
+    }
     if (!contextPopover.contains(target) && !composerToolbar.contains(target)) {
       closeContextPopover();
     }
@@ -238,7 +304,7 @@ function bindComposerEvents(): void {
       closePromptPalette();
     }
     if (!contextPopover.contains(target) && !promptPalette.contains(target) && !composerToolbar.contains(target)) {
-      setComposerExpanded(false);
+      closeComposerMenus();
     }
   });
 
@@ -251,9 +317,8 @@ function bindComposerEvents(): void {
     }
 
     if (event.key === "Escape") {
-      closeContextPopover();
-      closePromptPalette();
-      setComposerExpanded(false);
+      closeServiceMenu();
+      closeComposerMenus();
       return;
     }
 
@@ -273,7 +338,7 @@ function setComposerExpanded(expanded: boolean): void {
 
 async function toggleContextPopover(): Promise<void> {
   if (!contextPopover.hidden) {
-    closeContextPopover();
+    closeComposerMenus();
     return;
   }
 
@@ -281,6 +346,7 @@ async function toggleContextPopover(): Promise<void> {
   setComposerExpanded(true);
   contextButton.setAttribute("aria-expanded", "true");
   contextPopover.hidden = false;
+  syncDismissLayer();
   lastContext = await collectPageContext();
   renderContextActions(lastContext);
 }
@@ -288,6 +354,20 @@ async function toggleContextPopover(): Promise<void> {
 function closeContextPopover(): void {
   contextPopover.hidden = true;
   contextButton.setAttribute("aria-expanded", "false");
+  syncDismissLayer();
+}
+
+function closeComposerMenus(): void {
+  contextPopover.hidden = true;
+  contextButton.setAttribute("aria-expanded", "false");
+  promptPalette.hidden = true;
+  promptButton.setAttribute("aria-expanded", "false");
+  setComposerExpanded(false);
+  syncDismissLayer();
+}
+
+function syncDismissLayer(): void {
+  dismissLayer.hidden = contextPopover.hidden && promptPalette.hidden;
 }
 
 function renderContextActions(context: PageContext): void {
@@ -332,6 +412,7 @@ function openPromptPalette(): void {
   setComposerExpanded(true);
   promptButton.setAttribute("aria-expanded", "true");
   promptPalette.hidden = false;
+  syncDismissLayer();
   promptQuery = promptSearchInput.value;
   activePromptIndex = 0;
   renderPromptList();
@@ -342,6 +423,7 @@ function openPromptPalette(): void {
 function closePromptPalette(): void {
   promptPalette.hidden = true;
   promptButton.setAttribute("aria-expanded", "false");
+  syncDismissLayer();
 }
 
 function renderPromptList(): void {
@@ -582,12 +664,88 @@ async function loadConfiguredTarget(): Promise<void> {
   await loadTarget(target.id, target.label, target.url);
 }
 
-async function loadTarget(id: ActivePresetId, label: string, url: string): Promise<void> {
+async function selectService(presetId: string): Promise<void> {
+  const target = serviceOptions().find((option) => option.id === presetId);
+  if (!target) {
+    return;
+  }
+
+  const defaultChanged = settings.defaultPresetId !== target.id;
+  settings.defaultPresetId = target.id;
+  await loadTarget(target.id, target.label, target.url, { forceSave: defaultChanged });
+}
+
+async function moveService(sourceId: ActivePresetId, targetId: string): Promise<void> {
+  if (sourceId === targetId) {
+    return;
+  }
+
+  const orderedIds = orderedServiceIds({ includeHidden: true });
+  const sourceIndex = orderedIds.indexOf(sourceId);
+  const targetIndex = orderedIds.indexOf(targetId as ActivePresetId);
+  if (sourceIndex === -1 || targetIndex === -1) {
+    return;
+  }
+
+  const [moved] = orderedIds.splice(sourceIndex, 1);
+  orderedIds.splice(targetIndex, 0, moved);
+  settings.serviceOrder = orderedIds;
+  settings = await saveSettings(settings);
+  renderServiceSwitcher();
+  setStatus("Service order saved.");
+}
+
+async function hideService(serviceId: ActivePresetId): Promise<void> {
+  closeServiceMenu();
+  if (!settings.hiddenServiceIds.includes(serviceId)) {
+    settings.hiddenServiceIds.push(serviceId);
+  }
+
+  settings.serviceOrder = orderedServiceIds({ includeHidden: true });
+  const visibleOptions = serviceOptions().filter((option) => option.id !== serviceId);
+  if (visibleOptions.length === 0) {
+    settings.hiddenServiceIds = settings.hiddenServiceIds.filter((id) => id !== serviceId);
+    setStatus("Keep at least one service in the header.");
+    return;
+  }
+
+  if (settings.defaultPresetId === serviceId || settings.activePresetId === serviceId) {
+    const fallback = visibleOptions[0];
+    if (fallback) {
+      settings.defaultPresetId = fallback.id;
+      await loadTarget(fallback.id, fallback.label, fallback.url, { forceSave: true });
+      setStatus(`${fallback.label} is now shown.`);
+      return;
+    }
+  }
+
+  settings = await saveSettings(settings);
+  renderServiceSwitcher();
+  setStatus("Service hidden from header.");
+}
+
+function openServiceMenu(serviceId: string): void {
+  const option = serviceOptions({ includeHidden: true }).find((item) => item.id === serviceId);
+  if (!option) {
+    return;
+  }
+
+  menuServiceId = option.id;
+  hideServiceButton.textContent = `Hide ${option.label}`;
+  serviceMenu.hidden = false;
+}
+
+function closeServiceMenu(): void {
+  serviceMenu.hidden = true;
+  menuServiceId = null;
+}
+
+async function loadTarget(id: ActivePresetId, label: string, url: string, options: { forceSave?: boolean } = {}): Promise<void> {
   const changed = settings.activePresetId !== id || settings.lastUrlByPreset[id] !== url;
   settings.activePresetId = id;
   settings.lastUrlByPreset[id] = url;
   loadUrl(label, url);
-  if (changed) {
+  if (changed || options.forceSave) {
     await saveSettings(settings);
   }
 }
@@ -595,7 +753,7 @@ async function loadTarget(id: ActivePresetId, label: string, url: string): Promi
 function loadUrl(label: string, url: string, options: LoadOptions = {}): number {
   currentUrl = url;
   currentLabel = label;
-  updateCurrentUrlDisplay(url);
+  renderServiceSwitcher();
   fallbackServiceName.textContent = label;
   fallbackReason.textContent = defaultFallbackReason();
   fallbackPanel.hidden = true;
@@ -643,7 +801,7 @@ async function showSetupState(): Promise<void> {
   timedOutLoadToken = undefined;
   currentUrl = "";
   currentLabel = "";
-  updateCurrentUrlDisplay("");
+  renderServiceSwitcher();
   fallbackPanel.hidden = true;
   setupPanel.hidden = false;
   setLoading(false);
@@ -711,17 +869,6 @@ function reloadCurrentUrl(): void {
     return;
   }
   loadUrl(currentLabel || "AI service", currentUrl);
-}
-
-function loadUrlFromInput(): void {
-  const nextUrl = normalizeUserUrl(currentUrlInput.value);
-  if (!nextUrl) {
-    currentUrlInput.title = "Enter HTTPS, or http://localhost / http://127.0.0.1 for local testing.";
-    setStatus("Enter a valid HTTPS URL or local development URL.", "error");
-    return;
-  }
-
-  loadUrl(labelFromUrl(nextUrl), nextUrl);
 }
 
 async function openCurrentInTab(): Promise<void> {
@@ -964,7 +1111,95 @@ function syncSettingsUi(): void {
   const settingsLabel = `Open settings. Frame compatibility mode is ${compatibilityState}.`;
   moreActionsButton.title = settingsLabel;
   moreActionsButton.setAttribute("aria-label", settingsLabel);
+  renderServiceSwitcher();
   renderDiagnostics();
+}
+
+function renderServiceSwitcher(): void {
+  serviceSwitcher.textContent = "";
+
+  for (const option of serviceOptions()) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "service-button";
+    button.draggable = true;
+    button.dataset.presetId = option.id;
+    button.title = option.url ? `${option.label}: ${option.url}. Drag to reorder. Right-click to hide.` : option.label;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-label", `Open ${option.label}`);
+    button.setAttribute("aria-selected", isActiveService(option) ? "true" : "false");
+
+    if (option.iconSrc) {
+      const icon = document.createElement("img");
+      icon.src = option.iconSrc;
+      icon.alt = "";
+      icon.setAttribute("aria-hidden", "true");
+      button.append(icon);
+    } else {
+      const badge = document.createElement("span");
+      badge.className = "service-fallback-icon";
+      badge.setAttribute("aria-hidden", "true");
+      badge.textContent = serviceInitial(option.label);
+      button.append(badge);
+    }
+
+    const label = document.createElement("span");
+    label.className = "service-label";
+    label.textContent = option.label;
+    button.append(label);
+    serviceSwitcher.append(button);
+  }
+}
+
+function serviceOptions(options: { includeHidden?: boolean } = {}): ServiceOption[] {
+  const visibleIds = orderedServiceIds({ includeHidden: options.includeHidden === true });
+  const visibleIdSet = new Set(visibleIds);
+  const builtIns = BUILT_IN_PRESETS.map((preset) => ({
+    id: preset.id,
+    label: preset.label,
+    url: settings.lastUrlByPreset[preset.id] || preset.url,
+    iconSrc: SERVICE_ICON_SRC[preset.id],
+    isCustom: false
+  }));
+  const custom = settings.customUrls.map((customUrl) => {
+    const id = makeCustomPresetId(customUrl.id);
+    return {
+      id,
+      label: customUrl.label,
+      url: settings.lastUrlByPreset[id] || customUrl.url,
+      iconSrc: customUrl.iconUrl,
+      isCustom: true
+    };
+  });
+
+  const byId = new Map<ActivePresetId, ServiceOption>(
+    [...builtIns, ...custom].map((option) => [option.id, option])
+  );
+  return visibleIds
+    .filter((id) => visibleIdSet.has(id))
+    .map((id) => byId.get(id))
+    .filter((option): option is ServiceOption => !!option);
+}
+
+function orderedServiceIds(options: { includeHidden: boolean }): ActivePresetId[] {
+  const availableIds: ActivePresetId[] = [
+    ...BUILT_IN_PRESETS.map((preset) => preset.id),
+    ...settings.customUrls.map((customUrl) => makeCustomPresetId(customUrl.id))
+  ];
+  const availableSet = new Set<ActivePresetId>(availableIds);
+  const ordered = [
+    ...settings.serviceOrder.filter((id) => availableSet.has(id)),
+    ...availableIds.filter((id) => !settings.serviceOrder.includes(id))
+  ];
+  return options.includeHidden ? ordered : ordered.filter((id) => !settings.hiddenServiceIds.includes(id));
+}
+
+function isActiveService(option: ServiceOption): boolean {
+  return settings.activePresetId === option.id || (!!currentUrl && canonicalUrl(currentUrl) === canonicalUrl(option.url));
+}
+
+function serviceInitial(label: string): string {
+  return (label.trim().match(/[A-Za-z0-9]/)?.[0] || label.trim().charAt(0) || "?").toUpperCase();
 }
 
 function isDiagnosticBusy(): boolean {
@@ -1130,12 +1365,6 @@ function defaultFallbackReason(): string {
 
 function modeLabel(enabled: boolean): string {
   return enabled ? "on" : "off";
-}
-
-function updateCurrentUrlDisplay(url: string): void {
-  currentUrlInput.value = url;
-  currentUrlInput.title = url;
-  currentUrlInput.setAttribute("aria-label", url ? `Current service URL: ${url}` : "No service URL selected");
 }
 
 function canonicalUrl(value: string): string {

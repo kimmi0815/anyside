@@ -228,7 +228,7 @@ textarea:focus-visible {
 .url-row,
 .prompt-template-row {
   display: grid;
-  grid-template-columns: minmax(120px, 170px) minmax(0, 1fr) auto;
+  grid-template-columns: 30px minmax(120px, 170px) minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   padding: 10px;
@@ -257,6 +257,22 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.url-icon {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  object-fit: contain;
+}
+
+.url-icon-fallback {
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
 .url-row strong,
 .prompt-template-row strong {
   color: var(--text);
@@ -279,6 +295,17 @@ textarea:focus-visible {
   border-color: transparent;
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.hidden-service-list {
+  margin-top: 12px;
+}
+
+.restore-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .toggle-row {

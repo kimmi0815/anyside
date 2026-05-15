@@ -18,6 +18,8 @@ test("normalizeSettings keeps valid custom settings and drops invalid entries", 
         id: "docs",
         label: " Docs ",
         url: "docs.example.com",
+        iconUrl: "https://docs.example.com/favicon.ico",
+        iconUpdatedAt: 12,
         createdAt: 7
       },
       {
@@ -35,9 +37,12 @@ test("normalizeSettings keeps valid custom settings and drops invalid entries", 
     ],
     lastUrlByPreset: {
       chatgpt: "",
+      keep: "https://keep.google.com/",
       custom: "ftp://example.com",
       "custom:docs": "docs.example.com/chat"
     },
+    serviceOrder: ["keep", "custom:docs", "chatgpt", "custom:missing", "claude"],
+    hiddenServiceIds: ["gemini", "keep", "custom:missing"],
     enableFrameHeaderRelaxation: false,
     frameHeaderRelaxationAcknowledged: false,
     diagnostics: {
@@ -67,10 +72,15 @@ test("normalizeSettings keeps valid custom settings and drops invalid entries", 
       id: "docs",
       label: "Docs",
       url: "https://docs.example.com/",
+      iconUrl: "https://docs.example.com/favicon.ico",
+      iconUpdatedAt: 12,
       createdAt: 7
     }
   ]);
+  assert.deepEqual(settings.serviceOrder, ["custom:docs", "chatgpt", "claude", "gemini", "notebooklm"]);
+  assert.deepEqual(settings.hiddenServiceIds, ["gemini"]);
   assert.equal(settings.lastUrlByPreset.chatgpt, "https://chatgpt.com/");
+  assert.equal(settings.lastUrlByPreset.keep, undefined);
   assert.equal(settings.lastUrlByPreset.custom, "");
   assert.equal(settings.lastUrlByPreset["custom:docs"], "https://docs.example.com/chat");
   assert.equal(settings.enableFrameHeaderRelaxation, false);
@@ -78,10 +88,37 @@ test("normalizeSettings keeps valid custom settings and drops invalid entries", 
   assert.deepEqual(Object.keys(settings.diagnostics), ["valid"]);
 });
 
+test("normalizeSettings migrates removed Keep selections and invalid icon URLs", () => {
+  const settings = normalizeSettings({
+    defaultPresetId: "keep",
+    activePresetId: "keep",
+    customUrls: [
+      {
+        id: "bad-icon",
+        label: "Bad Icon",
+        url: "https://bad.example.com/",
+        iconUrl: "javascript:alert(1)",
+        iconUpdatedAt: 1,
+        createdAt: 2
+      }
+    ],
+    serviceOrder: ["keep"],
+    hiddenServiceIds: ["keep"]
+  });
+
+  assert.equal(settings.defaultPresetId, "chatgpt");
+  assert.equal(settings.activePresetId, "chatgpt");
+  assert.equal(settings.customUrls[0].iconUrl, undefined);
+  assert.deepEqual(settings.serviceOrder, ["chatgpt", "claude", "gemini", "notebooklm", "custom:bad-icon"]);
+  assert.deepEqual(settings.hiddenServiceIds, []);
+});
+
 test("frame header relaxation is off by default and old implicit true settings must opt in again", () => {
   const defaults = defaultSettings();
   assert.equal(defaults.enableFrameHeaderRelaxation, false);
   assert.equal(defaults.frameHeaderRelaxationAcknowledged, false);
+  assert.deepEqual(defaults.serviceOrder, ["chatgpt", "claude", "gemini", "notebooklm"]);
+  assert.deepEqual(defaults.hiddenServiceIds, []);
 
   const legacyImplicit = normalizeSettings({
     enableFrameHeaderRelaxation: true

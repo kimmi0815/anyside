@@ -14,6 +14,7 @@ import type { ActivePresetId, CustomUrl, RuntimeMessage, RuntimeResponse, Settin
 import { labelFromUrl, normalizeUserUrl } from "../shared/url.js";
 
 const defaultPresetSelect = element<HTMLSelectElement>("defaultPresetSelect");
+const hiddenServiceList = element<HTMLElement>("hiddenServiceList");
 const customUrlForm = element<HTMLFormElement>("customUrlForm");
 const customLabelInput = element<HTMLInputElement>("customLabelInput");
 const customUrlInput = element<HTMLInputElement>("customUrlInput");
@@ -51,6 +52,14 @@ function bindEvents(): void {
     settings.defaultPresetId = defaultPresetSelect.value as ActivePresetId;
     settings.activePresetId = settings.defaultPresetId;
     void persist("Side panel service saved.");
+  });
+
+  hiddenServiceList.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement) || !target.dataset.restoreServiceId) {
+      return;
+    }
+    void restoreHiddenService(target.dataset.restoreServiceId as ActivePresetId);
   });
 
   dnrToggle.addEventListener("change", () => {
@@ -142,6 +151,7 @@ function bindEvents(): void {
 
 function render(): void {
   renderDefaultSelect();
+  renderHiddenServices();
   renderCustomUrls();
   renderPromptTemplates();
   dnrToggle.checked = settings.enableFrameHeaderRelaxation;
@@ -150,14 +160,41 @@ function render(): void {
 function renderDefaultSelect(): void {
   defaultPresetSelect.textContent = "";
 
-  for (const preset of BUILT_IN_PRESETS) {
+  for (const preset of BUILT_IN_PRESETS.filter((preset) => !settings.hiddenServiceIds.includes(preset.id))) {
     defaultPresetSelect.append(option(preset.id, preset.label));
   }
-  for (const customUrl of settings.customUrls) {
+  for (const customUrl of settings.customUrls.filter((customUrl) => !settings.hiddenServiceIds.includes(makeCustomPresetId(customUrl.id)))) {
     defaultPresetSelect.append(option(makeCustomPresetId(customUrl.id), customUrl.label));
   }
 
   defaultPresetSelect.value = settings.defaultPresetId;
+}
+
+function renderHiddenServices(): void {
+  hiddenServiceList.textContent = "";
+  const hiddenServices = settings.hiddenServiceIds
+    .map((id) => ({ id, label: serviceLabel(id) }))
+    .filter((item) => item.label);
+  if (hiddenServices.length === 0) {
+    return;
+  }
+
+  const title = document.createElement("p");
+  title.className = "hint";
+  title.textContent = "Hidden from header";
+  hiddenServiceList.append(title);
+
+  const list = document.createElement("div");
+  list.className = "restore-list";
+  for (const service of hiddenServices) {
+    const button = document.createElement("button");
+    button.className = "button";
+    button.type = "button";
+    button.dataset.restoreServiceId = service.id;
+    button.textContent = `Show ${service.label}`;
+    list.append(button);
+  }
+  hiddenServiceList.append(list);
 }
 
 function renderCustomUrls(): void {
@@ -241,6 +278,15 @@ function customUrlRow(customUrl: CustomUrl): HTMLElement {
   const label = document.createElement("strong");
   label.textContent = customUrl.label;
 
+  const icon = document.createElement(customUrl.iconUrl ? "img" : "span");
+  icon.className = customUrl.iconUrl ? "url-icon" : "url-icon url-icon-fallback";
+  if (customUrl.iconUrl && icon instanceof HTMLImageElement) {
+    icon.src = customUrl.iconUrl;
+    icon.alt = "";
+  } else {
+    icon.textContent = serviceInitial(customUrl.label);
+  }
+
   const url = document.createElement("span");
   url.textContent = customUrl.url;
   url.title = customUrl.url;
@@ -261,7 +307,7 @@ function customUrlRow(customUrl: CustomUrl): HTMLElement {
   deleteButton.dataset.deleteId = customUrl.id;
 
   actions.append(editButton, deleteButton);
-  row.append(label, url, actions);
+  row.append(icon, label, url, actions);
   return row;
 }
 
@@ -312,16 +358,19 @@ async function addCustomUrl(): Promise<void> {
   }
 
   const label = customLabelInput.value.trim() || labelFromUrl(url);
+  const iconUrl = await findIconForUrl(url);
   settings.customUrls.push({
     id: crypto.randomUUID(),
     label,
     url,
+    iconUrl,
+    iconUpdatedAt: iconUrl ? Date.now() : undefined,
     createdAt: Date.now()
   });
 
   customLabelInput.value = "";
   customUrlInput.value = "";
-  await persist("Custom URL added.");
+  await persist(iconUrl ? "Custom URL added with site icon." : "Custom URL added.");
   render();
 }
 
@@ -341,8 +390,14 @@ async function updateCustomUrl(id: string, form: HTMLFormElement): Promise<void>
     return;
   }
 
+  const urlChanged = customUrl.url !== url;
   customUrl.label = String(formData.get("label") || "").trim() || labelFromUrl(url);
   customUrl.url = url;
+  if (urlChanged || !customUrl.iconUrl) {
+    const iconUrl = await findIconForUrl(url);
+    customUrl.iconUrl = iconUrl;
+    customUrl.iconUpdatedAt = iconUrl ? Date.now() : undefined;
+  }
   settings.lastUrlByPreset[makeCustomPresetId(id)] = url;
 
   editingCustomUrlId = null;
@@ -354,6 +409,8 @@ async function deleteCustomUrl(id: string): Promise<void> {
   const presetId = makeCustomPresetId(id);
   settings.customUrls = settings.customUrls.filter((customUrl) => customUrl.id !== id);
   delete settings.lastUrlByPreset[presetId];
+  settings.serviceOrder = settings.serviceOrder.filter((id) => id !== presetId);
+  settings.hiddenServiceIds = settings.hiddenServiceIds.filter((id) => id !== presetId);
   if (editingCustomUrlId === id) {
     editingCustomUrlId = null;
   }
@@ -494,16 +551,144 @@ async function migrateBareCustomDefault(): Promise<void> {
 
   const id = crypto.randomUUID();
   const presetId = makeCustomPresetId(id);
+  const iconUrl = await findIconForUrl(url);
   settings.customUrls.push({
     id,
     label: labelFromUrl(url),
     url,
+    iconUrl,
+    iconUpdatedAt: iconUrl ? Date.now() : undefined,
     createdAt: Date.now()
   });
   settings.defaultPresetId = presetId;
   settings.activePresetId = presetId;
   settings.lastUrlByPreset[presetId] = url;
   settings = await saveSettings(settings);
+}
+
+async function restoreHiddenService(id: ActivePresetId): Promise<void> {
+  settings.hiddenServiceIds = settings.hiddenServiceIds.filter((serviceId) => serviceId !== id);
+  if (!settings.serviceOrder.includes(id)) {
+    settings.serviceOrder.push(id);
+  }
+  await persist("Service restored to the header.");
+  render();
+}
+
+function serviceLabel(id: ActivePresetId): string {
+  const builtIn = BUILT_IN_PRESETS.find((preset) => preset.id === id);
+  if (builtIn) {
+    return builtIn.label;
+  }
+
+  const customId = id.startsWith("custom:") ? id.slice("custom:".length) : "";
+  const customUrl = settings.customUrls.find((entry) => entry.id === customId);
+  return customUrl?.label || "";
+}
+
+function serviceInitial(label: string): string {
+  return (label.trim().match(/[A-Za-z0-9]/)?.[0] || label.trim().charAt(0) || "?").toUpperCase();
+}
+
+async function findIconForUrl(url: string): Promise<string | undefined> {
+  const candidates = await iconCandidatesForUrl(url);
+  for (const candidate of candidates) {
+    if (await canLoadImage(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+async function iconCandidatesForUrl(url: string): Promise<string[]> {
+  const candidates: string[] = [];
+  const addCandidate = (value: string | null | undefined) => {
+    const normalized = normalizeIconCandidate(value, url);
+    if (normalized && !candidates.includes(normalized)) {
+      candidates.push(normalized);
+    }
+  };
+
+  try {
+    const response = await fetch(url, { credentials: "omit" });
+    if (response.ok && response.headers.get("content-type")?.includes("text/html")) {
+      const html = await response.text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      for (const link of Array.from(doc.querySelectorAll<HTMLLinkElement>("link[rel]"))) {
+        const rel = link.rel.toLowerCase();
+        if (rel.includes("apple-touch-icon") || rel.includes("icon")) {
+          addCandidate(link.href || link.getAttribute("href"));
+        }
+        if (rel === "manifest") {
+          await addCandidateFromManifest(link.href || link.getAttribute("href"), url, addCandidate);
+        }
+      }
+    }
+  } catch {
+    // Cross-origin pages often block HTML reads; /favicon.ico remains a safe fallback.
+  }
+
+  addCandidate(new URL("/favicon.ico", url).href);
+  return candidates;
+}
+
+async function addCandidateFromManifest(
+  manifestUrl: string | null | undefined,
+  pageUrl: string,
+  addCandidate: (value: string | null | undefined) => void
+): Promise<void> {
+  const normalizedManifestUrl = normalizeIconCandidate(manifestUrl, pageUrl);
+  if (!normalizedManifestUrl) {
+    return;
+  }
+
+  try {
+    const response = await fetch(normalizedManifestUrl, { credentials: "omit" });
+    if (!response.ok) {
+      return;
+    }
+    const manifest = await response.json();
+    if (!manifest || !Array.isArray(manifest.icons)) {
+      return;
+    }
+    for (const icon of manifest.icons) {
+      if (icon && typeof icon.src === "string") {
+        addCandidate(new URL(icon.src, normalizedManifestUrl).href);
+      }
+    }
+  } catch {
+    // Manifest discovery is opportunistic.
+  }
+}
+
+function normalizeIconCandidate(value: string | null | undefined, baseUrl: string): string | undefined {
+  if (!value?.trim()) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(value.trim(), baseUrl);
+    const base = new URL(baseUrl);
+    if (parsed.origin !== base.origin) {
+      return undefined;
+    }
+    if (parsed.protocol === "https:" || (parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1"))) {
+      return parsed.href;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function canLoadImage(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(true);
+    image.onerror = () => resolve(false);
+    image.src = url;
+  });
 }
 
 async function sendMessage(message: RuntimeMessage): Promise<RuntimeResponse> {
