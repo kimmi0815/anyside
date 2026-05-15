@@ -583,10 +583,13 @@ async function loadConfiguredTarget(): Promise<void> {
 }
 
 async function loadTarget(id: ActivePresetId, label: string, url: string): Promise<void> {
+  const changed = settings.activePresetId !== id || settings.lastUrlByPreset[id] !== url;
   settings.activePresetId = id;
   settings.lastUrlByPreset[id] = url;
   loadUrl(label, url);
-  await saveSettings(settings);
+  if (changed) {
+    await saveSettings(settings);
+  }
 }
 
 function loadUrl(label: string, url: string, options: LoadOptions = {}): number {
@@ -629,12 +632,7 @@ function loadUrl(label: string, url: string, options: LoadOptions = {}): number 
     }
   }, LOAD_TIMEOUT_MS);
 
-  frame.src = "about:blank";
-  window.setTimeout(() => {
-    if (token === loadToken) {
-      frame.src = url;
-    }
-  }, 0);
+  frame.src = url;
 
   return token;
 }
@@ -651,21 +649,24 @@ async function showSetupState(): Promise<void> {
   setLoading(false);
   setStatus("Choose a side panel service in Options.", "idle");
   aiFrame.src = "about:blank";
-  settings.activePresetId = settings.defaultPresetId;
-  await saveSettings(settings);
+  if (settings.activePresetId !== settings.defaultPresetId) {
+    settings.activePresetId = settings.defaultPresetId;
+    await saveSettings(settings);
+  }
 }
 
 function replaceFrameForLoad(token: number, expectedUrl: string): HTMLIFrameElement {
   const nextFrame = aiFrame.cloneNode(false) as HTMLIFrameElement;
+  nextFrame.src = "about:blank";
   nextFrame.addEventListener("load", () => {
-    completeLoad(token, expectedUrl, "loaded");
+    completeLoad(token, expectedUrl);
   });
   aiFrame.replaceWith(nextFrame);
   aiFrame = nextFrame;
   return nextFrame;
 }
 
-function completeLoad(token: number, expectedUrl: string, status: DiagnosticStatus): void {
+function completeLoad(token: number, expectedUrl: string): void {
   if (token !== loadToken || completedLoadToken === token || expectedUrl !== currentUrl || aiFrame.src === "about:blank") {
     return;
   }
@@ -680,11 +681,28 @@ function completeLoad(token: number, expectedUrl: string, status: DiagnosticStat
   clearLoadTimers();
   fallbackPanel.hidden = true;
   setLoading(false);
-  if (updateActiveDiagnostic(status)) {
-    setStatus("Diagnostic finished. Restoring the previous service...", "diagnostic");
+  if (activeDiagnostic?.token === token) {
+    markDiagnosticAwaitingVerification(activeDiagnostic);
+    setStatus("Diagnostic frame load event fired. Cross-origin frames cannot be inspected; mark the visual result.", "diagnostic");
     return;
   }
   setStatus(`${currentLabel || "Service"} ${loadedAfterTimeout ? "loaded after waiting" : "loaded"}.`, "success");
+}
+
+function markDiagnosticAwaitingVerification(diagnostic: ActiveDiagnostic): void {
+  const entry = settings.diagnostics[diagnostic.key];
+  if (!entry) {
+    return;
+  }
+
+  settings.diagnostics[diagnostic.key] = {
+    ...entry,
+    message: "Load event fired. Cross-origin frames cannot be inspected; use Mark to record the visual result."
+  };
+  void saveSettings(settings).then((next) => {
+    settings = next;
+    renderDiagnostics();
+  });
 }
 
 function reloadCurrentUrl(): void {

@@ -11,7 +11,7 @@ const MENU_SELECTION_ID = "ask-anyside-selection";
 const MENU_OPEN_ID = "open-anyside";
 const LEGACY_FALLBACK_WINDOW_KEY = "aiSidecar.fallbackWindow";
 const AI_INPUT_AGENT_PORT = "ai-input-agent";
-const INSERT_TIMEOUT_MS = 1200;
+const INSERT_TIMEOUT_MS = 3000;
 
 type AiAgentRecord = {
   port: chrome.runtime.Port;
@@ -37,12 +37,17 @@ type AiInsertResultMessage = {
 
 const aiInputAgents = new Set<AiAgentRecord>();
 
-chrome.runtime.onInstalled.addListener(() => {
-  void initializeExtension({ resetMenus: true });
-});
+let initializationPromise: Promise<void> | undefined;
 
-chrome.runtime.onStartup.addListener(() => {
-  void initializeExtension({ resetMenus: false });
+function ensureInitialized(options: { resetMenus: boolean } = { resetMenus: false }): Promise<void> {
+  if (!initializationPromise) {
+    initializationPromise = initializeExtension(options);
+  }
+  return initializationPromise;
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  initializationPromise = initializeExtension({ resetMenus: true });
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -104,7 +109,7 @@ chrome.windows.onRemoved.addListener((windowId) => {
   void clearFallbackWindowIfNeeded(windowId);
 });
 
-void initializeExtension({ resetMenus: false });
+void ensureInitialized();
 
 async function initializeExtension(options: { resetMenus: boolean }): Promise<void> {
   const settings = await getSettings();
@@ -299,17 +304,26 @@ async function requestAgentInsert(port: chrome.runtime.Port, text: string): Prom
       }
       finish(message.success === true, message.reason || (message.success ? "inserted" : "insert-failed"));
     };
+    const disconnectListener = () => {
+      finish(false, "insert-failed");
+    };
     const finish = (success: boolean, reason: AIInputInsertReason) => {
       if (settled) {
         return;
       }
       settled = true;
       clearTimeout(timer);
-      port.onMessage.removeListener(listener);
+      try {
+        port.onMessage.removeListener(listener);
+        port.onDisconnect.removeListener(disconnectListener);
+      } catch {
+        // Listeners may already be detached after disconnect; ignore.
+      }
       resolve({ success, reason });
     };
 
     port.onMessage.addListener(listener);
+    port.onDisconnect.addListener(disconnectListener);
     try {
       port.postMessage({ type: "INSERT_TEXT", requestId, text });
     } catch {
@@ -413,15 +427,35 @@ async function copyText(text: string, tab?: chrome.tabs.Tab): Promise<void> {
   }
 
   await ensureOffscreenDocument();
-  const response = await chrome.runtime.sendMessage({
-    type: Messages.OFFSCREEN_COPY_TEXT,
-    target: "offscreen",
-    text
-  });
+  const response = await sendOffscreenCopy(text);
 
   if (!response?.ok) {
     throw new Error(response?.error || "Clipboard copy failed.");
   }
+}
+
+const OFFSCREEN_COPY_MAX_ATTEMPTS = 5;
+const OFFSCREEN_COPY_RETRY_DELAY_MS = 50;
+
+async function sendOffscreenCopy(text: string): Promise<{ ok: boolean; error?: string } | undefined> {
+  let lastResponse: { ok: boolean; error?: string } | undefined;
+  for (let attempt = 0; attempt < OFFSCREEN_COPY_MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: Messages.OFFSCREEN_COPY_TEXT,
+        target: "offscreen",
+        text
+      });
+      if (response && typeof response === "object") {
+        return response as { ok: boolean; error?: string };
+      }
+      lastResponse = response as undefined;
+    } catch (error) {
+      lastResponse = { ok: false, error: errorMessage(error) };
+    }
+    await new Promise((resolve) => setTimeout(resolve, OFFSCREEN_COPY_RETRY_DELAY_MS));
+  }
+  return lastResponse ?? { ok: false, error: "Offscreen document did not respond." };
 }
 
 function canInjectIntoTab(tab: chrome.tabs.Tab): boolean {
