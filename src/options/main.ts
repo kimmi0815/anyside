@@ -13,7 +13,6 @@ import type { PromptTemplate } from "../features/composer/types.js";
 import type { ActivePresetId, CustomUrl, RuntimeMessage, RuntimeResponse, Settings } from "../shared/types.js";
 import { labelFromUrl, normalizeUserUrl } from "../shared/url.js";
 
-const defaultPresetSelect = element<HTMLSelectElement>("defaultPresetSelect");
 const hiddenServiceList = element<HTMLElement>("hiddenServiceList");
 const customUrlForm = element<HTMLFormElement>("customUrlForm");
 const customLabelInput = element<HTMLInputElement>("customLabelInput");
@@ -24,18 +23,19 @@ const promptTitleInput = element<HTMLInputElement>("promptTitleInput");
 const promptCategoryInput = element<HTMLInputElement>("promptCategoryInput");
 const promptBodyInput = element<HTMLTextAreaElement>("promptBodyInput");
 const promptSubmitButton = element<HTMLButtonElement>("promptSubmitButton");
-const promptCancelButton = element<HTMLButtonElement>("promptCancelButton");
 const promptTemplateList = element<HTMLElement>("promptTemplateList");
 const dnrToggle = element<HTMLInputElement>("dnrToggle");
 const resetSettingsButton = element<HTMLButtonElement>("resetSettingsButton");
 const statusText = element<HTMLElement>("statusText");
+const aboutVersion = element<HTMLElement>("aboutVersion");
 const CUSTOM_URL_ERROR = "Enter HTTPS, or http://localhost / http://127.0.0.1 for local testing. You can omit the protocol.";
 const PROMPT_TEMPLATE_ERROR = "Prompt title and body are required.";
+const STATUS_RESET_MS = 2000;
+const ENTRY_STATUS_SHOW_MS = 1600;
 
 let settings: Settings;
-let editingCustomUrlId: string | null = null;
 let customPromptTemplates: PromptTemplate[] = [];
-let editingPromptTemplateId: string | null = null;
+let statusTimer: number | undefined;
 
 void init();
 
@@ -43,17 +43,13 @@ async function init(): Promise<void> {
   settings = await getSettings();
   customPromptTemplates = await getCustomPromptTemplates();
   await migrateBareCustomDefault();
+  renderVersion();
   render();
   bindEvents();
+  observeSections();
 }
 
 function bindEvents(): void {
-  defaultPresetSelect.addEventListener("change", () => {
-    settings.defaultPresetId = defaultPresetSelect.value as ActivePresetId;
-    settings.activePresetId = settings.defaultPresetId;
-    void persist("Side panel service saved.");
-  });
-
   hiddenServiceList.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLButtonElement) || !target.dataset.restoreServiceId) {
@@ -73,58 +69,76 @@ function bindEvents(): void {
 
   promptTemplateForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    void savePromptTemplate();
+    void addPromptTemplate();
   });
 
-  promptCancelButton.addEventListener("click", () => {
-    clearPromptTemplateForm();
-  });
-
-  customUrlList.addEventListener("submit", (event) => {
-    event.preventDefault();
+  customUrlList.addEventListener("focusout", (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLFormElement) || !target.dataset.editId) {
+    if (!(target instanceof HTMLInputElement)) {
       return;
     }
-    void updateCustomUrl(target.dataset.editId, target);
+    const entry = target.closest<HTMLElement>(".entry");
+    const customUrlId = entry?.dataset.entryId;
+    if (!entry || !customUrlId) {
+      return;
+    }
+    void handleCustomUrlBlur(customUrlId, target, entry);
+  });
+
+  customUrlList.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    const target = event.target;
+    if (target instanceof HTMLInputElement) {
+      event.preventDefault();
+      target.blur();
+    }
   });
 
   customUrlList.addEventListener("click", (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLButtonElement)) {
+    if (!(target instanceof HTMLElement)) {
       return;
     }
+    const button = target.closest<HTMLButtonElement>("button[data-delete-id]");
+    if (button?.dataset.deleteId) {
+      void deleteCustomUrl(button.dataset.deleteId);
+    }
+  });
 
-    if (target.dataset.editId) {
-      editingCustomUrlId = target.dataset.editId;
-      renderCustomUrls();
+  promptTemplateList.addEventListener("focusout", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) {
       return;
     }
-
-    if (target.dataset.cancelEditId) {
-      editingCustomUrlId = null;
-      renderCustomUrls();
+    const entry = target.closest<HTMLElement>(".entry");
+    const templateId = entry?.dataset.entryId;
+    if (!entry || !templateId) {
       return;
     }
+    void handlePromptTemplateBlur(templateId, target, entry);
+  });
 
-    if (target.dataset.deleteId) {
-      void deleteCustomUrl(target.dataset.deleteId);
+  promptTemplateList.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    const target = event.target;
+    if (target instanceof HTMLInputElement) {
+      event.preventDefault();
+      target.blur();
     }
   });
 
   promptTemplateList.addEventListener("click", (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLButtonElement)) {
+    if (!(target instanceof HTMLElement)) {
       return;
     }
-
-    if (target.dataset.editPromptId) {
-      beginEditPromptTemplate(target.dataset.editPromptId);
-      return;
-    }
-
-    if (target.dataset.deletePromptId) {
-      void removePromptTemplate(target.dataset.deletePromptId);
+    const button = target.closest<HTMLButtonElement>("button[data-delete-prompt-id]");
+    if (button?.dataset.deletePromptId) {
+      void removePromptTemplate(button.dataset.deletePromptId);
     }
   });
 
@@ -149,25 +163,63 @@ function bindEvents(): void {
   });
 }
 
+function observeSections(): void {
+  if (typeof document.querySelectorAll !== "function" || typeof IntersectionObserver === "undefined") {
+    return;
+  }
+
+  const navItems = Array.from(document.querySelectorAll<HTMLAnchorElement>(".nav-item[data-target]"));
+  const sectionMap = new Map<string, HTMLAnchorElement>();
+  for (const item of navItems) {
+    const target = item.dataset.target;
+    if (target) {
+      sectionMap.set(target, item);
+    }
+  }
+
+  const sections = Array.from(sectionMap.keys()).map((id) => document.getElementById(id)).filter(Boolean) as HTMLElement[];
+  if (sections.length === 0) {
+    return;
+  }
+
+  const visible = new Map<string, number>();
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        visible.set(entry.target.id, entry.intersectionRatio);
+      }
+      let bestId = "";
+      let bestRatio = 0;
+      for (const [id, ratio] of visible) {
+        if (ratio > bestRatio) {
+          bestId = id;
+          bestRatio = ratio;
+        }
+      }
+      for (const [id, item] of sectionMap) {
+        item.classList.toggle("is-active", id === bestId);
+      }
+    },
+    { rootMargin: "-30% 0px -50% 0px", threshold: [0, 0.25, 0.5, 0.75, 1] }
+  );
+
+  for (const section of sections) {
+    observer.observe(section);
+  }
+}
+
 function render(): void {
-  renderDefaultSelect();
   renderHiddenServices();
   renderCustomUrls();
   renderPromptTemplates();
   dnrToggle.checked = settings.enableFrameHeaderRelaxation;
 }
 
-function renderDefaultSelect(): void {
-  defaultPresetSelect.textContent = "";
-
-  for (const preset of BUILT_IN_PRESETS.filter((preset) => !settings.hiddenServiceIds.includes(preset.id))) {
-    defaultPresetSelect.append(option(preset.id, preset.label));
+function renderVersion(): void {
+  const manifest = chrome.runtime.getManifest?.();
+  if (manifest?.version) {
+    aboutVersion.textContent = manifest.version;
   }
-  for (const customUrl of settings.customUrls.filter((customUrl) => !settings.hiddenServiceIds.includes(makeCustomPresetId(customUrl.id)))) {
-    defaultPresetSelect.append(option(makeCustomPresetId(customUrl.id), customUrl.label));
-  }
-
-  defaultPresetSelect.value = settings.defaultPresetId;
 }
 
 function renderHiddenServices(): void {
@@ -188,7 +240,7 @@ function renderHiddenServices(): void {
   list.className = "restore-list";
   for (const service of hiddenServices) {
     const button = document.createElement("button");
-    button.className = "button";
+    button.className = "button subtle";
     button.type = "button";
     button.dataset.restoreServiceId = service.id;
     button.textContent = `Show ${service.label}`;
@@ -201,19 +253,12 @@ function renderCustomUrls(): void {
   customUrlList.textContent = "";
 
   if (settings.customUrls.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    const title = document.createElement("strong");
-    title.textContent = "No custom URLs yet";
-    const copy = document.createElement("p");
-    copy.textContent = "Add a trusted AI workspace or local test page, then choose it as your side panel service.";
-    empty.append(title, copy);
-    customUrlList.append(empty);
+    customUrlList.append(emptyState("No custom URLs yet", "Add a trusted AI workspace or local test page above, then switch to it from the side panel header."));
     return;
   }
 
   for (const customUrl of settings.customUrls) {
-    customUrlList.append(customUrl.id === editingCustomUrlId ? editableCustomUrlRow(customUrl) : customUrlRow(customUrl));
+    customUrlList.append(customUrlEntry(customUrl));
   }
 }
 
@@ -221,133 +266,321 @@ function renderPromptTemplates(): void {
   promptTemplateList.textContent = "";
 
   if (customPromptTemplates.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    const title = document.createElement("strong");
-    title.textContent = "No custom prompts yet";
-    const copy = document.createElement("p");
-    copy.textContent = "Add the prompts you reach for often, then use them from the Prompt palette.";
-    empty.append(title, copy);
-    promptTemplateList.append(empty);
+    promptTemplateList.append(emptyState("No custom prompts yet", "Add the prompts you reach for often, then use them from the Prompt palette."));
     return;
   }
 
   for (const template of customPromptTemplates) {
-    promptTemplateList.append(promptTemplateRow(template));
+    promptTemplateList.append(promptTemplateEntry(template));
   }
 }
 
-function promptTemplateRow(template: PromptTemplate): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "prompt-template-row";
+function customUrlEntry(customUrl: CustomUrl): HTMLElement {
+  const entry = document.createElement("div");
+  entry.className = "entry";
+  entry.dataset.entryId = customUrl.id;
 
-  const title = document.createElement("strong");
-  title.textContent = template.title;
+  const head = document.createElement("div");
+  head.className = "entry-head";
 
-  const category = document.createElement("span");
-  category.textContent = template.category;
+  head.append(createEntryIcon(customUrl.iconUrl, serviceInitial(customUrl.label)));
 
-  const body = document.createElement("span");
-  body.textContent = template.body.replace(/\s+/g, " ");
-  body.title = template.body;
+  const fields = document.createElement("div");
+  fields.className = "entry-fields";
 
-  const actions = document.createElement("div");
-  actions.className = "row-actions";
+  const labelInput = document.createElement("input");
+  labelInput.className = "entry-input";
+  labelInput.type = "text";
+  labelInput.name = "label";
+  labelInput.value = customUrl.label;
+  labelInput.placeholder = "Workspace name";
+  labelInput.spellcheck = false;
+  labelInput.setAttribute("aria-label", "Workspace name");
 
-  const editButton = document.createElement("button");
-  editButton.className = "button";
-  editButton.type = "button";
-  editButton.textContent = "Edit";
-  editButton.dataset.editPromptId = template.id;
+  const urlInput = document.createElement("input");
+  urlInput.className = "entry-input is-secondary";
+  urlInput.type = "text";
+  urlInput.name = "url";
+  urlInput.inputMode = "url";
+  urlInput.value = customUrl.url;
+  urlInput.placeholder = "https://example.com/";
+  urlInput.spellcheck = false;
+  urlInput.setAttribute("autocomplete", "url");
+  urlInput.setAttribute("aria-label", "Workspace URL");
 
-  const deleteButton = document.createElement("button");
-  deleteButton.className = "button";
-  deleteButton.type = "button";
-  deleteButton.textContent = "Remove";
-  deleteButton.dataset.deletePromptId = template.id;
+  fields.append(labelInput, urlInput);
+  head.append(fields, entryActions(customUrl.id, "deleteId", "Remove this URL"));
+  entry.append(head);
 
-  actions.append(editButton, deleteButton);
-  row.append(title, category, body, actions);
-  return row;
+  const foot = document.createElement("div");
+  foot.className = "entry-foot";
+  const status = document.createElement("span");
+  status.className = "entry-status";
+  status.dataset.role = "status";
+  foot.append(status);
+  entry.append(foot);
+
+  return entry;
 }
 
-function customUrlRow(customUrl: CustomUrl): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "url-row";
+function promptTemplateEntry(template: PromptTemplate): HTMLElement {
+  const entry = document.createElement("div");
+  entry.className = "entry";
+  entry.dataset.entryId = template.id;
 
-  const label = document.createElement("strong");
-  label.textContent = customUrl.label;
+  const head = document.createElement("div");
+  head.className = "entry-head";
 
-  const icon = document.createElement(customUrl.iconUrl ? "img" : "span");
-  icon.className = customUrl.iconUrl ? "url-icon" : "url-icon url-icon-fallback";
-  if (customUrl.iconUrl && icon instanceof HTMLImageElement) {
-    icon.src = customUrl.iconUrl;
-    icon.alt = "";
+  head.append(createEntryIcon(undefined, serviceInitial(template.title)));
+
+  const fields = document.createElement("div");
+  fields.className = "entry-fields";
+
+  const titleInput = document.createElement("input");
+  titleInput.className = "entry-input";
+  titleInput.type = "text";
+  titleInput.name = "title";
+  titleInput.value = template.title;
+  titleInput.placeholder = "Prompt title";
+  titleInput.setAttribute("aria-label", "Prompt title");
+
+  const categoryInput = document.createElement("input");
+  categoryInput.className = "entry-input is-secondary";
+  categoryInput.type = "text";
+  categoryInput.name = "category";
+  categoryInput.value = template.category;
+  categoryInput.placeholder = "Category";
+  categoryInput.setAttribute("aria-label", "Prompt category");
+
+  fields.append(titleInput, categoryInput);
+  head.append(fields, entryActions(template.id, "deletePromptId", "Remove this prompt"));
+  entry.append(head);
+
+  const body = document.createElement("textarea");
+  body.className = "entry-textarea";
+  body.name = "body";
+  body.rows = 4;
+  body.value = template.body;
+  body.placeholder = "Prompt body";
+  body.spellcheck = true;
+  body.setAttribute("aria-label", "Prompt body");
+  entry.append(body);
+
+  const foot = document.createElement("div");
+  foot.className = "entry-foot";
+  if (template.category) {
+    const tag = document.createElement("span");
+    tag.className = "entry-tag";
+    tag.textContent = template.category;
+    foot.append(tag);
+  }
+  const status = document.createElement("span");
+  status.className = "entry-status";
+  status.dataset.role = "status";
+  foot.append(status);
+  entry.append(foot);
+
+  return entry;
+}
+
+function entryActions(id: string, datasetKey: "deleteId" | "deletePromptId", removeLabel: string): HTMLElement {
+  const actions = document.createElement("div");
+  actions.className = "entry-actions";
+
+  const remove = document.createElement("button");
+  remove.className = "icon-button danger";
+  remove.type = "button";
+  remove.setAttribute("aria-label", removeLabel);
+  remove.title = removeLabel;
+  if (datasetKey === "deleteId") {
+    remove.dataset.deleteId = id;
   } else {
-    icon.textContent = serviceInitial(customUrl.label);
+    remove.dataset.deletePromptId = id;
   }
+  remove.append(svgIcon("M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"));
 
-  const url = document.createElement("span");
-  url.textContent = customUrl.url;
-  url.title = customUrl.url;
-
-  const actions = document.createElement("div");
-  actions.className = "row-actions";
-
-  const editButton = document.createElement("button");
-  editButton.className = "button";
-  editButton.type = "button";
-  editButton.textContent = "Edit";
-  editButton.dataset.editId = customUrl.id;
-
-  const deleteButton = document.createElement("button");
-  deleteButton.className = "button";
-  deleteButton.type = "button";
-  deleteButton.textContent = "Remove";
-  deleteButton.dataset.deleteId = customUrl.id;
-
-  actions.append(editButton, deleteButton);
-  row.append(icon, label, url, actions);
-  return row;
+  actions.append(remove);
+  return actions;
 }
 
-function editableCustomUrlRow(customUrl: CustomUrl): HTMLElement {
-  const form = document.createElement("form");
-  form.className = "url-row url-row-editing";
-  form.dataset.editId = customUrl.id;
+function svgIcon(path: string): SVGElement {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS(NS, "path");
+  p.setAttribute("d", path);
+  p.setAttribute("stroke-linecap", "round");
+  p.setAttribute("stroke-linejoin", "round");
+  svg.append(p);
+  return svg;
+}
 
-  const label = document.createElement("input");
-  label.name = "label";
-  label.type = "text";
-  label.value = customUrl.label;
-  label.placeholder = "Research workspace";
+function createEntryIcon(iconUrl: string | undefined, fallback: string): HTMLElement {
+  if (iconUrl) {
+    const img = document.createElement("img");
+    img.className = "entry-icon";
+    img.src = iconUrl;
+    img.alt = "";
+    img.setAttribute("aria-hidden", "true");
+    return img;
+  }
+  const span = document.createElement("span");
+  span.className = "entry-icon";
+  span.textContent = fallback;
+  return span;
+}
 
-  const url = document.createElement("input");
-  url.name = "url";
-  url.type = "text";
-  url.inputMode = "url";
-  url.setAttribute("autocomplete", "url");
-  url.spellcheck = false;
-  url.value = customUrl.url;
-  url.placeholder = "example.com or https://example.com/";
+function emptyState(title: string, copy: string): HTMLElement {
+  const empty = document.createElement("div");
+  empty.className = "empty-state";
+  const strong = document.createElement("strong");
+  strong.textContent = title;
+  const p = document.createElement("p");
+  p.textContent = copy;
+  empty.append(strong, p);
+  return empty;
+}
 
-  const actions = document.createElement("div");
-  actions.className = "row-actions";
+async function handleCustomUrlBlur(id: string, input: HTMLInputElement, entry: HTMLElement): Promise<void> {
+  const customUrl = settings.customUrls.find((entry) => entry.id === id);
+  if (!customUrl) {
+    return;
+  }
 
-  const saveButton = document.createElement("button");
-  saveButton.className = "button primary";
-  saveButton.type = "submit";
-  saveButton.textContent = "Save";
+  if (input.name === "url") {
+    const next = normalizeUserUrl(input.value);
+    if (!next) {
+      input.classList.add("is-invalid");
+      showEntryStatus(entry, CUSTOM_URL_ERROR, "error");
+      input.value = customUrl.url;
+      setTimeout(() => input.classList.remove("is-invalid"), 1200);
+      return;
+    }
+    input.classList.remove("is-invalid");
+    if (next === customUrl.url) {
+      return;
+    }
+    customUrl.url = next;
+    input.value = next;
+    settings.lastUrlByPreset[makeCustomPresetId(id)] = next;
+    const iconUrl = await findIconForUrl(next);
+    customUrl.iconUrl = iconUrl;
+    customUrl.iconUpdatedAt = iconUrl ? Date.now() : undefined;
+    await persistEntry(entry);
+    refreshEntryIcon(entry, customUrl);
+    return;
+  }
 
-  const cancelButton = document.createElement("button");
-  cancelButton.className = "button";
-  cancelButton.type = "button";
-  cancelButton.textContent = "Cancel";
-  cancelButton.dataset.cancelEditId = customUrl.id;
+  if (input.name === "label") {
+    const next = input.value.trim() || labelFromUrl(customUrl.url);
+    if (next === customUrl.label) {
+      return;
+    }
+    customUrl.label = next;
+    input.value = next;
+    await persistEntry(entry);
+  }
+}
 
-  actions.append(saveButton, cancelButton);
-  form.append(label, url, actions);
-  return form;
+async function handlePromptTemplateBlur(
+  id: string,
+  input: HTMLInputElement | HTMLTextAreaElement,
+  entry: HTMLElement
+): Promise<void> {
+  const template = customPromptTemplates.find((item) => item.id === id);
+  if (!template) {
+    return;
+  }
+
+  const value = input.value.trim();
+
+  if (input.name === "title") {
+    if (!value) {
+      input.classList.add("is-invalid");
+      showEntryStatus(entry, "Title is required.", "error");
+      input.value = template.title;
+      setTimeout(() => input.classList.remove("is-invalid"), 1200);
+      return;
+    }
+    input.classList.remove("is-invalid");
+    if (value === template.title) {
+      return;
+    }
+    customPromptTemplates = await updateCustomPromptTemplate(id, {
+      title: value,
+      category: template.category,
+      body: template.body,
+      favorite: template.favorite
+    });
+    showEntryStatus(entry, "Saved", "saved");
+    return;
+  }
+
+  if (input.name === "category") {
+    if (value === template.category) {
+      return;
+    }
+    customPromptTemplates = await updateCustomPromptTemplate(id, {
+      title: template.title,
+      category: value,
+      body: template.body,
+      favorite: template.favorite
+    });
+    showEntryStatus(entry, "Saved", "saved");
+    renderPromptTemplates();
+    return;
+  }
+
+  if (input.name === "body") {
+    if (!value) {
+      input.classList.add("is-invalid");
+      showEntryStatus(entry, "Prompt body is required.", "error");
+      input.value = template.body;
+      setTimeout(() => input.classList.remove("is-invalid"), 1200);
+      return;
+    }
+    input.classList.remove("is-invalid");
+    if (value === template.body) {
+      return;
+    }
+    customPromptTemplates = await updateCustomPromptTemplate(id, {
+      title: template.title,
+      category: template.category,
+      body: value,
+      favorite: template.favorite
+    });
+    showEntryStatus(entry, "Saved", "saved");
+  }
+}
+
+async function persistEntry(entry: HTMLElement): Promise<void> {
+  settings = await saveSettings(settings);
+  showEntryStatus(entry, "Saved", "saved");
+}
+
+function refreshEntryIcon(entry: HTMLElement, customUrl: CustomUrl): void {
+  const existing = entry.querySelector(".entry-icon");
+  if (!existing) {
+    return;
+  }
+  const replacement = createEntryIcon(customUrl.iconUrl, serviceInitial(customUrl.label));
+  existing.replaceWith(replacement);
+}
+
+function showEntryStatus(entry: HTMLElement, message: string, tone: "saved" | "error"): void {
+  const status = entry.querySelector<HTMLElement>("[data-role='status']");
+  if (!status) {
+    return;
+  }
+  status.textContent = message;
+  status.classList.remove("is-saved", "is-error");
+  status.classList.add("is-shown", tone === "saved" ? "is-saved" : "is-error");
+  setTimeout(() => {
+    if (status.textContent === message) {
+      status.classList.remove("is-shown");
+    }
+  }, ENTRY_STATUS_SHOW_MS);
 }
 
 async function addCustomUrl(): Promise<void> {
@@ -370,38 +603,8 @@ async function addCustomUrl(): Promise<void> {
 
   customLabelInput.value = "";
   customUrlInput.value = "";
-  await persist(iconUrl ? "Custom URL added with site icon." : "Custom URL added.");
-  render();
-}
-
-async function updateCustomUrl(id: string, form: HTMLFormElement): Promise<void> {
-  const formData = new FormData(form);
-  const url = normalizeUserUrl(String(formData.get("url") || ""));
-  if (!url) {
-    setStatus(CUSTOM_URL_ERROR);
-    return;
-  }
-
-  const customUrl = settings.customUrls.find((entry) => entry.id === id);
-  if (!customUrl) {
-    setStatus("That custom URL is no longer available.");
-    editingCustomUrlId = null;
-    render();
-    return;
-  }
-
-  const urlChanged = customUrl.url !== url;
-  customUrl.label = String(formData.get("label") || "").trim() || labelFromUrl(url);
-  customUrl.url = url;
-  if (urlChanged || !customUrl.iconUrl) {
-    const iconUrl = await findIconForUrl(url);
-    customUrl.iconUrl = iconUrl;
-    customUrl.iconUpdatedAt = iconUrl ? Date.now() : undefined;
-  }
-  settings.lastUrlByPreset[makeCustomPresetId(id)] = url;
-
-  editingCustomUrlId = null;
-  await persist("Custom URL saved.");
+  settings = await saveSettings(settings);
+  setStatus(iconUrl ? "Custom URL added with site icon." : "Custom URL added.");
   render();
 }
 
@@ -411,9 +614,6 @@ async function deleteCustomUrl(id: string): Promise<void> {
   delete settings.lastUrlByPreset[presetId];
   settings.serviceOrder = settings.serviceOrder.filter((id) => id !== presetId);
   settings.hiddenServiceIds = settings.hiddenServiceIds.filter((id) => id !== presetId);
-  if (editingCustomUrlId === id) {
-    editingCustomUrlId = null;
-  }
 
   if (settings.defaultPresetId === presetId) {
     settings.defaultPresetId = DEFAULT_PRESET_ID;
@@ -422,11 +622,12 @@ async function deleteCustomUrl(id: string): Promise<void> {
     settings.activePresetId = settings.defaultPresetId;
   }
 
-  await persist("Custom URL removed.");
+  settings = await saveSettings(settings);
+  setStatus("Custom URL removed.");
   render();
 }
 
-async function savePromptTemplate(): Promise<void> {
+async function addPromptTemplate(): Promise<void> {
   const title = promptTitleInput.value.trim();
   const category = promptCategoryInput.value.trim();
   const body = promptBodyInput.value.trim();
@@ -438,51 +639,21 @@ async function savePromptTemplate(): Promise<void> {
 
   promptSubmitButton.disabled = true;
   try {
-    const input = { title, category, body, favorite: true };
-    customPromptTemplates = editingPromptTemplateId
-      ? await updateCustomPromptTemplate(editingPromptTemplateId, input)
-      : await addCustomPromptTemplate(input);
-    const message = editingPromptTemplateId ? "Prompt saved." : "Prompt added.";
-    clearPromptTemplateForm();
+    customPromptTemplates = await addCustomPromptTemplate({ title, category, body, favorite: true });
+    promptTitleInput.value = "";
+    promptCategoryInput.value = "";
+    promptBodyInput.value = "";
     renderPromptTemplates();
-    setStatus(message);
+    setStatus("Prompt added.");
   } finally {
     promptSubmitButton.disabled = false;
   }
 }
 
-function beginEditPromptTemplate(id: string): void {
-  const template = customPromptTemplates.find((item) => item.id === id);
-  if (!template) {
-    setStatus("That prompt is no longer available.");
-    return;
-  }
-
-  editingPromptTemplateId = template.id;
-  promptTitleInput.value = template.title;
-  promptCategoryInput.value = template.category;
-  promptBodyInput.value = template.body;
-  promptSubmitButton.textContent = "Save Prompt";
-  promptCancelButton.hidden = false;
-  promptTitleInput.focus();
-}
-
 async function removePromptTemplate(id: string): Promise<void> {
   customPromptTemplates = await deleteCustomPromptTemplate(id);
-  if (editingPromptTemplateId === id) {
-    clearPromptTemplateForm();
-  }
   renderPromptTemplates();
   setStatus("Prompt removed.");
-}
-
-function clearPromptTemplateForm(): void {
-  editingPromptTemplateId = null;
-  promptTitleInput.value = "";
-  promptCategoryInput.value = "";
-  promptBodyInput.value = "";
-  promptSubmitButton.textContent = "Add Prompt";
-  promptCancelButton.hidden = true;
 }
 
 async function resetSettings(): Promise<void> {
@@ -503,7 +674,6 @@ async function resetSettings(): Promise<void> {
     }
 
     settings = await saveSettings(defaults);
-    editingCustomUrlId = null;
     customLabelInput.value = "";
     customUrlInput.value = "";
     render();
@@ -527,11 +697,6 @@ async function setDnrEnabled(enabled: boolean): Promise<void> {
   settings = response.settings;
   render();
   setStatus(`Iframe compatibility mode ${enabled ? "enabled" : "disabled"}.`);
-}
-
-async function persist(message: string): Promise<void> {
-  settings = await saveSettings(settings);
-  setStatus(message);
 }
 
 async function migrateBareCustomDefault(): Promise<void> {
@@ -571,7 +736,8 @@ async function restoreHiddenService(id: ActivePresetId): Promise<void> {
   if (!settings.serviceOrder.includes(id)) {
     settings.serviceOrder.push(id);
   }
-  await persist("Service restored to the header.");
+  settings = await saveSettings(settings);
+  setStatus("Service restored to the header.");
   render();
 }
 
@@ -699,15 +865,15 @@ async function sendMessage(message: RuntimeMessage): Promise<RuntimeResponse> {
   }
 }
 
-function option(value: string, label: string): HTMLOptionElement {
-  const item = document.createElement("option");
-  item.value = value;
-  item.textContent = label;
-  return item;
-}
-
 function setStatus(message: string): void {
   statusText.textContent = message;
+  if (statusTimer !== undefined) {
+    clearTimeout(statusTimer);
+  }
+  statusTimer = setTimeout(() => {
+    statusText.textContent = "";
+    statusTimer = undefined;
+  }, STATUS_RESET_MS);
 }
 
 function element<T extends HTMLElement>(id: string): T {

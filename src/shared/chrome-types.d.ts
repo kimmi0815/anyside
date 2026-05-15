@@ -30,6 +30,7 @@ declare namespace chrome {
     function getURL(path: string): string;
     function openOptionsPage(): void;
     function getContexts(options: { contextTypes: string[]; documentUrls: string[] }): Promise<Array<Record<string, unknown>>>;
+    function getManifest(): { version?: string; name?: string; [key: string]: unknown };
   }
 
   namespace action {

@@ -29,20 +29,24 @@ test("options restores services hidden from the side panel header", async () => 
   globalThis.HTMLImageElement = FakeImageElement;
   globalThis.document = document;
   globalThis.chrome = createChromeMock(storageData);
+  globalThis.IntersectionObserver = class {
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+  };
 
   try {
     await import(`../dist/options/main.js?hidden-services-${Date.now()}`);
     await flushAsync();
 
     assert.match(textTree(document.getElementById("hiddenServiceList")), /Show Claude/);
-    assert.doesNotMatch(textTree(document.getElementById("defaultPresetSelect")), /Claude/);
 
     const restoreButton = findByDataset(document.getElementById("hiddenServiceList"), "restoreServiceId", "claude");
     document.getElementById("hiddenServiceList").dispatch("click", { target: restoreButton });
     await flushAsync();
 
     assert.deepEqual(storageData["anyside.settings"].hiddenServiceIds, []);
-    assert.match(textTree(document.getElementById("defaultPresetSelect")), /Claude/);
+    assert.doesNotMatch(textTree(document.getElementById("hiddenServiceList")), /Show Claude/);
   } finally {
     delete globalThis.chrome;
     delete globalThis.document;
@@ -50,24 +54,25 @@ test("options restores services hidden from the side panel header", async () => 
     delete globalThis.HTMLButtonElement;
     delete globalThis.HTMLFormElement;
     delete globalThis.HTMLImageElement;
+    delete globalThis.IntersectionObserver;
   }
 });
 
 function createOptionsDocument() {
   const document = new FakeDocument();
   for (const id of [
-    "defaultPresetSelect",
     "hiddenServiceList",
     "customUrlList",
     "promptTemplateList",
-    "statusText"
+    "statusText",
+    "aboutVersion"
   ]) {
     document.register(new FakeElement(id, document));
   }
   for (const id of ["customUrlForm", "promptTemplateForm"]) {
     document.register(new FakeFormElement(id, document));
   }
-  for (const id of ["promptSubmitButton", "promptCancelButton", "resetSettingsButton"]) {
+  for (const id of ["promptSubmitButton", "resetSettingsButton"]) {
     document.register(new FakeButtonElement(id, document));
   }
   for (const id of ["customLabelInput", "customUrlInput", "promptTitleInput", "promptCategoryInput", "dnrToggle"]) {
@@ -82,6 +87,9 @@ function createChromeMock(storageData) {
     runtime: {
       async sendMessage() {
         return { ok: true, settings: storageData["anyside.settings"] };
+      },
+      getManifest() {
+        return { version: "0.1.0", name: "anyside" };
       }
     },
     storage: {

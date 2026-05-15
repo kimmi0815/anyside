@@ -7,80 +7,132 @@
     <link rel="stylesheet" href="./options.css">
   </head>
   <body>
-    <main class="options">
-      <header class="options-hero">
-        <div class="brand-heading">
+    <div class="app">
+      <aside class="sidebar" aria-label="Settings navigation">
+        <a class="brand" href="#top">
           <img class="brand-mark" src="../../assets/brand/anyside-logo.png" alt="" aria-hidden="true">
-          <div>
-            <h1>anyside Options</h1>
-            <p>Choose what appears in the side panel, manage custom URLs, and control iframe compatibility mode.</p>
+          <span class="brand-text">
+            <span class="brand-name">anyside</span>
+            <span class="brand-tag">Options</span>
+          </span>
+        </a>
+
+        <nav class="nav" aria-label="Sections">
+          <a href="#services" class="nav-item" data-target="services">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h18" stroke-linecap="round"/></svg>
+            <span>Services</span>
+          </a>
+          <a href="#prompts" class="nav-item" data-target="prompts">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16l-7-4-7 4z" stroke-linejoin="round"/></svg>
+            <span>Prompts</span>
+          </a>
+          <a href="#compatibility" class="nav-item" data-target="compatibility">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 4-9 4-9-4 9-4z"/><path d="M3 12l9 4 9-4M3 17l9 4 9-4" stroke-linejoin="round"/></svg>
+            <span>Compatibility</span>
+          </a>
+          <a href="#about" class="nav-item" data-target="about">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01M11 12h1v5h1" stroke-linecap="round"/></svg>
+            <span>About</span>
+          </a>
+        </nav>
+
+        <p id="statusText" class="status" role="status" aria-live="polite"></p>
+      </aside>
+
+      <main class="content" id="top">
+        <header class="hero">
+          <h1>Settings</h1>
+          <p>Manage your services, prompt library, and compatibility options. The side panel handles day-to-day switching.</p>
+        </header>
+
+        <section id="services" class="card">
+          <div class="card-head">
+            <h2>Services</h2>
+            <p>Add custom AI workspaces. Use the side panel header to reorder, hide, or switch between them.</p>
           </div>
-        </div>
-      </header>
 
-      <section class="option-card">
-        <h2>Side panel service</h2>
-        <label class="field">
-          <span>Show this service in the side panel</span>
-          <select id="defaultPresetSelect"></select>
-        </label>
-        <div id="hiddenServiceList" class="hidden-service-list"></div>
-      </section>
+          <form id="customUrlForm" class="custom-form" novalidate>
+            <label class="field">
+              <span>Name</span>
+              <input id="customLabelInput" type="text" placeholder="Research workspace">
+            </label>
+            <label class="field">
+              <span>URL</span>
+              <input id="customUrlInput" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="example.com or https://example.com/">
+            </label>
+            <button class="button primary" type="submit">
+              <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14"><path d="M12 5v14M5 12h14" stroke-linecap="round" stroke-width="2.2"/></svg>
+              Add URL
+            </button>
+          </form>
 
-      <section class="option-card">
-        <h2>Custom URLs</h2>
-        <form id="customUrlForm" class="custom-form" novalidate>
-          <label class="field">
-            <span>Name</span>
-            <input id="customLabelInput" type="text" placeholder="Research workspace">
-          </label>
-          <label class="field">
-            <span>URL</span>
-            <input id="customUrlInput" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="example.com or https://example.com/">
-          </label>
-          <button class="button primary" type="submit">Add URL</button>
-        </form>
-        <div id="customUrlList" class="url-list"></div>
-      </section>
+          <div id="customUrlList" class="card-list"></div>
+          <div id="hiddenServiceList" class="hidden-service-list"></div>
+        </section>
 
-      <section class="option-card">
-        <h2>Prompt templates</h2>
-        <form id="promptTemplateForm" class="prompt-form" novalidate>
-          <label class="field">
-            <span>Title</span>
-            <input id="promptTitleInput" type="text" autocomplete="off" placeholder="このページを深掘り">
-          </label>
-          <label class="field">
-            <span>Category</span>
-            <input id="promptCategoryInput" type="text" autocomplete="off" placeholder="カスタム">
-          </label>
-          <label class="field prompt-body-field">
-            <span>Prompt body</span>
-            <textarea id="promptBodyInput" rows="7" spellcheck="true" placeholder="次のページについて...&#10;&#10;タイトル:&#10;{{title}}&#10;&#10;URL:&#10;{{url}}&#10;&#10;内容:&#10;{{selection}}"></textarea>
-          </label>
-          <div class="form-actions">
-            <button id="promptSubmitButton" class="button primary" type="submit">Add Prompt</button>
-            <button id="promptCancelButton" class="button" type="button" hidden>Cancel edit</button>
+        <section id="prompts" class="card">
+          <div class="card-head">
+            <h2>Prompt templates</h2>
+            <p>Build a library you can summon from the Prompt palette (⌘K / Ctrl+K).</p>
           </div>
-        </form>
-        <p class="hint">Use {{title}}, {{url}}, {{selection}}, {{date}}, and {{service}} in custom prompts.</p>
-        <div id="promptTemplateList" class="prompt-template-list"></div>
-      </section>
 
-      <section class="option-card">
-        <h2>Iframe compatibility</h2>
-        <label class="toggle-row">
-          <input id="dnrToggle" type="checkbox">
-          <span>Relax frame-blocking headers for built-in AI subframes</span>
-        </label>
-        <p class="hint">Off by default. Enabling this removes selected frame-blocking headers from subframe requests to chatgpt.com, claude.ai, gemini.google.com, www.perplexity.ai, and notebooklm.google.com while the mode is on. Chrome applies the rules browser-wide, not only inside anyside's Side Panel. Custom URLs and main-frame browsing are not covered.</p>
-      </section>
+          <form id="promptTemplateForm" class="prompt-form" novalidate>
+            <label class="field">
+              <span>Title</span>
+              <input id="promptTitleInput" type="text" autocomplete="off" placeholder="このページを深掘り">
+            </label>
+            <label class="field">
+              <span>Category</span>
+              <input id="promptCategoryInput" type="text" autocomplete="off" placeholder="カスタム">
+            </label>
+            <button id="promptSubmitButton" class="button primary" type="submit">
+              <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14"><path d="M12 5v14M5 12h14" stroke-linecap="round" stroke-width="2.2"/></svg>
+              Add Prompt
+            </button>
+            <label class="field prompt-body-field">
+              <span>Prompt body</span>
+              <textarea id="promptBodyInput" rows="6" spellcheck="true" placeholder="次のページについて...&#10;&#10;タイトル:&#10;{{title}}&#10;&#10;URL:&#10;{{url}}&#10;&#10;内容:&#10;{{selection}}"></textarea>
+            </label>
+          </form>
 
-      <div class="footer-actions">
-        <button id="resetSettingsButton" class="button secondary" type="button">Reset to defaults</button>
-        <p id="statusText" class="status" role="status"></p>
-      </div>
-    </main>
+          <p class="hint">Available variables: <code>{{title}}</code> <code>{{url}}</code> <code>{{selection}}</code> <code>{{date}}</code> <code>{{service}}</code></p>
+
+          <div id="promptTemplateList" class="card-list"></div>
+        </section>
+
+        <section id="compatibility" class="card">
+          <div class="card-head">
+            <h2>Iframe compatibility</h2>
+            <p>Off by default. Enable only if a built-in AI service refuses to load inside the side panel.</p>
+          </div>
+          <label class="toggle-row">
+            <input id="dnrToggle" type="checkbox">
+            <span>Relax frame-blocking headers for built-in AI subframes</span>
+          </label>
+          <p class="hint">Chrome applies these rules browser-wide while enabled, not only inside anyside. Custom URLs and main-frame browsing are never modified. Fallback window mode is the safer alternative when iframe loading is unreliable.</p>
+        </section>
+
+        <section id="about" class="card about-card">
+          <div class="card-head">
+            <h2>About</h2>
+            <p>anyside keeps ChatGPT, Claude, Gemini, NotebookLM, and your custom AI workspaces in Chrome's Side Panel.</p>
+          </div>
+          <dl class="about-meta">
+            <div>
+              <dt>Version</dt>
+              <dd id="aboutVersion">0.1.0</dd>
+            </div>
+            <div>
+              <dt>Privacy</dt>
+              <dd>No prompts or page content are sent to anyside servers — everything stays in your browser.</dd>
+            </div>
+          </dl>
+          <div class="about-actions">
+            <button id="resetSettingsButton" class="button danger" type="button">Reset to defaults</button>
+          </div>
+        </section>
+      </main>
+    </div>
 
     <script type="module" src="../../dist/options/main.js"></script>
   </body>
