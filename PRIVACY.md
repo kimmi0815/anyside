@@ -4,7 +4,7 @@ anyside is a local Chrome extension. It has no backend server of its own and doe
 
 ## Stored Data
 
-anyside stores settings in local Chrome extension storage, including the selected service, custom URLs, hidden services, service order, diagnostic status, and custom prompt templates. Custom URL entries can include a discovered icon URL and the time it was refreshed.
+anyside stores settings in local Chrome extension storage, including the selected service, custom URLs, quick access visibility, service order, diagnostic status, and custom prompt templates. Custom URL entries can include a discovered icon URL and the time it was refreshed.
 
 Use Reset settings in Options to return extension settings to defaults. You can also remove all stored extension data by uninstalling the extension from Chrome.
 

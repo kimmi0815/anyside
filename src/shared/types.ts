@@ -1,6 +1,19 @@
 import type { AIService, InsertResult, PageContext } from "../features/composer/types.js";
 
-export type PresetId = "chatgpt" | "claude" | "gemini" | "perplexity" | "notebooklm";
+export type PresetId =
+  | "chatgpt"
+  | "gemini"
+  | "claude"
+  | "perplexity"
+  | "notebooklm"
+  | "grok"
+  | "copilot"
+  | "deepseek"
+  | "kimi"
+  | "minimax"
+  | "glm"
+  | "manus"
+  | "genspark";
 
 export type ActivePresetId = PresetId | "custom" | `custom:${string}`;
 
@@ -42,6 +55,7 @@ export type Settings = {
   customUrls: CustomUrl[];
   serviceOrder: ActivePresetId[];
   hiddenServiceIds: ActivePresetId[];
+  quickAccessConfigured: boolean;
   sidePanelChrome: SidePanelChromeSettings;
   lastUrlByPreset: Record<string, string>;
   enableFrameHeaderRelaxation: boolean;

@@ -2,12 +2,24 @@ import type { ActivePresetId, BuiltInPreset, PresetId, ResolvedTarget, Settings 
 
 export const BUILT_IN_PRESETS: BuiltInPreset[] = [
   { id: "chatgpt", label: "ChatGPT", url: "https://chatgpt.com/" },
-  { id: "claude", label: "Claude", url: "https://claude.ai/" },
   { id: "gemini", label: "Gemini", url: "https://gemini.google.com/" },
+  { id: "claude", label: "Claude", url: "https://claude.ai/" },
   { id: "perplexity", label: "Perplexity", url: "https://www.perplexity.ai/" },
-  { id: "notebooklm", label: "NotebookLM", url: "https://notebooklm.google.com/" }
+  { id: "notebooklm", label: "NotebookLM", url: "https://notebooklm.google.com/" },
+  { id: "grok", label: "Grok", url: "https://grok.com/" },
+  { id: "copilot", label: "Copilot", url: "https://copilot.microsoft.com/" },
+  { id: "deepseek", label: "DeepSeek", url: "https://chat.deepseek.com/" },
+  { id: "kimi", label: "Kimi", url: "https://www.kimi.com/" },
+  { id: "minimax", label: "MiniMax", url: "https://agent.minimax.io/" },
+  { id: "glm", label: "GLM", url: "https://chat.z.ai/" },
+  { id: "manus", label: "Manus", url: "https://manus.im/" },
+  { id: "genspark", label: "Genspark", url: "https://www.genspark.ai/" }
 ];
 
+export const DEFAULT_QUICK_ACCESS_PRESET_IDS: PresetId[] = ["chatgpt", "gemini", "claude"];
+export const DEFAULT_HIDDEN_PRESET_IDS: PresetId[] = BUILT_IN_PRESETS.map((preset) => preset.id).filter(
+  (id) => !DEFAULT_QUICK_ACCESS_PRESET_IDS.includes(id)
+);
 export const FRAME_COMPATIBILITY_DOMAINS = BUILT_IN_PRESETS.map((preset) => new URL(preset.url).hostname);
 
 export const DEFAULT_PRESET_ID: PresetId = "chatgpt";

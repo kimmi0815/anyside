@@ -7,10 +7,18 @@ It displays a local extension page in the Side Panel and loads the selected AI s
 ## Included services
 
 - ChatGPT: `https://chatgpt.com/`
-- Claude: `https://claude.ai/`
 - Gemini: `https://gemini.google.com/`
+- Claude: `https://claude.ai/`
 - Perplexity: `https://www.perplexity.ai/`
 - NotebookLM: `https://notebooklm.google.com/`
+- Grok: `https://grok.com/`
+- Copilot: `https://copilot.microsoft.com/`
+- DeepSeek: `https://chat.deepseek.com/`
+- Kimi: `https://www.kimi.com/`
+- MiniMax: `https://agent.minimax.io/`
+- GLM: `https://chat.z.ai/`
+- Manus: `https://manus.im/`
+- Genspark: `https://www.genspark.ai/`
 - Custom URL
 
 ## Build
@@ -51,9 +59,9 @@ npm run release:zip
 
 ## Side Panel UI
 
-The Side Panel keeps the AI frame visually primary. The header switches services, and loading, timeout, and error states use a small transient banner or fallback actions.
+The Side Panel keeps the AI frame visually primary. The header switches quick access services, and loading, timeout, and error states use a small transient banner or fallback actions.
 
-Custom URLs are managed in Options. HTTPS URLs can be entered with or without `https://`; local testing URLs may use `http://localhost`, `http://127.0.0.1`, or the same localhost inputs without a protocol.
+Quick access is managed in Options. ChatGPT, Gemini, and Claude appear in the header by default; other built-in services and custom URLs can be added or removed from the header there. HTTPS URLs can be entered with or without `https://`; local testing URLs may use `http://localhost`, `http://127.0.0.1`, or the same localhost inputs without a protocol.
 
 ## Developer diagnostics
 
@@ -70,7 +78,7 @@ Some AI sites block iframe embedding with `X-Frame-Options` or `Content-Security
 - `x-frame-options`
 - `content-security-policy`
 
-The allowlisted request domains are `chatgpt.com`, `claude.ai`, `gemini.google.com`, `www.perplexity.ai`, and `notebooklm.google.com`. The packaged static ruleset at `rules/allow-framing-ai-sites.json` remains disabled; runtime compatibility uses short-lived session rules automatically while a built-in AI iframe is being loaded from the extension Side Panel.
+The allowlisted request domains are `chatgpt.com`, `gemini.google.com`, `claude.ai`, `www.perplexity.ai`, `notebooklm.google.com`, `grok.com`, `copilot.microsoft.com`, `chat.deepseek.com`, `www.kimi.com`, `agent.minimax.io`, `chat.z.ai`, `manus.im`, and `www.genspark.ai`. The packaged static ruleset at `rules/allow-framing-ai-sites.json` remains disabled; runtime compatibility uses short-lived session rules automatically while a built-in AI iframe is being loaded from the extension Side Panel.
 
 This compatibility behavior is intentionally limited:
 

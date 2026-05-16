@@ -5,10 +5,18 @@ type SupportedService = Exclude<AIService, "unknown">;
 
 const SERVICE_HOSTS: Record<SupportedService, string[]> = {
   chatgpt: ["chatgpt.com", "chat.openai.com"],
-  claude: ["claude.ai"],
   gemini: ["gemini.google.com"],
+  claude: ["claude.ai"],
   perplexity: ["perplexity.ai"],
-  notebooklm: ["notebooklm.google.com"]
+  notebooklm: ["notebooklm.google.com"],
+  grok: ["grok.com"],
+  copilot: ["copilot.microsoft.com"],
+  deepseek: ["deepseek.com"],
+  kimi: ["kimi.com"],
+  minimax: ["minimax.io"],
+  glm: ["z.ai"],
+  manus: ["manus.im"],
+  genspark: ["genspark.ai"]
 };
 
 const SERVICE_SELECTORS: Record<SupportedService, string[]> = {
@@ -60,6 +68,62 @@ const SERVICE_SELECTORS: Record<SupportedService, string[]> = {
     "div[contenteditable='true'][role='textbox']",
     "div[role='textbox'][contenteditable='true']",
     "textarea"
+  ],
+  grok: [
+    "textarea[placeholder*='Ask' i]",
+    "textarea[aria-label*='Ask' i]",
+    "textarea[placeholder*='Message' i]",
+    "div[contenteditable='true'][role='textbox'][aria-label*='Ask' i]",
+    "div[contenteditable='true'][role='textbox'][aria-label*='Message' i]"
+  ],
+  copilot: [
+    "textarea[aria-label*='Ask' i]",
+    "textarea[placeholder*='Ask' i]",
+    "textarea[placeholder*='Message' i]",
+    "div[contenteditable='true'][role='textbox'][aria-label*='Ask' i]",
+    "div[contenteditable='true'][role='textbox'][aria-label*='Message' i]"
+  ],
+  deepseek: [
+    "textarea[placeholder*='Message' i]",
+    "textarea[placeholder*='Ask' i]",
+    "textarea[aria-label*='Message' i]",
+    "textarea[aria-label*='Ask' i]",
+    "div[contenteditable='true'][role='textbox'][aria-label*='Message' i]"
+  ],
+  kimi: [
+    "textarea[placeholder*='Ask' i]",
+    "textarea[placeholder*='Message' i]",
+    "textarea[aria-label*='Ask' i]",
+    "textarea[aria-label*='Message' i]",
+    "div[contenteditable='true'][role='textbox'][aria-label*='Ask' i]"
+  ],
+  minimax: [
+    "textarea[placeholder*='Ask' i]",
+    "textarea[placeholder*='Message' i]",
+    "textarea[aria-label*='Ask' i]",
+    "textarea[aria-label*='Message' i]",
+    "div[contenteditable='true'][role='textbox'][aria-label*='Ask' i]"
+  ],
+  glm: [
+    "textarea[placeholder*='Ask' i]",
+    "textarea[placeholder*='Message' i]",
+    "textarea[aria-label*='Ask' i]",
+    "textarea[aria-label*='Message' i]",
+    "div[contenteditable='true'][role='textbox'][aria-label*='Ask' i]"
+  ],
+  manus: [
+    "textarea[placeholder*='Ask' i]",
+    "textarea[placeholder*='Message' i]",
+    "textarea[aria-label*='Ask' i]",
+    "textarea[aria-label*='Message' i]",
+    "div[contenteditable='true'][role='textbox'][aria-label*='Ask' i]"
+  ],
+  genspark: [
+    "textarea[placeholder*='Ask' i]",
+    "textarea[placeholder*='Message' i]",
+    "textarea[aria-label*='Ask' i]",
+    "textarea[aria-label*='Message' i]",
+    "div[contenteditable='true'][role='textbox'][aria-label*='Ask' i]"
   ]
 };
 

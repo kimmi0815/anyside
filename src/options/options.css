@@ -587,7 +587,7 @@ button:focus-visible {
   line-height: 1.55;
 }
 
-/* ---------- Hidden services restore ---------- */
+/* ---------- Quick access ---------- */
 
 .hidden-service-list {
   margin-top: 18px;
@@ -599,11 +599,46 @@ button:focus-visible {
   display: none;
 }
 
-.restore-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.quick-access-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
   margin-top: 8px;
+}
+
+.quick-access-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-glass);
+}
+
+.quick-access-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quick-access-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-access-copy span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---------- Toggle ---------- */
@@ -616,7 +651,8 @@ button:focus-visible {
   font-weight: 600;
 }
 
-.toggle-row input {
+.toggle-row input,
+.quick-access-row input {
   appearance: none;
   position: relative;
   width: 42px;
@@ -629,7 +665,8 @@ button:focus-visible {
   transition: background-color 220ms ease;
 }
 
-.toggle-row input::after {
+.toggle-row input::after,
+.quick-access-row input::after {
   content: "";
   position: absolute;
   top: 2px;
@@ -642,12 +679,19 @@ button:focus-visible {
   transition: transform 220ms ease;
 }
 
-.toggle-row input:checked {
+.toggle-row input:checked,
+.quick-access-row input:checked {
   background: var(--accent);
 }
 
-.toggle-row input:checked::after {
+.toggle-row input:checked::after,
+.quick-access-row input:checked::after {
   transform: translateX(18px);
+}
+
+.quick-access-row input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 /* ---------- Hint / code ---------- */

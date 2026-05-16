@@ -1,20 +1,23 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-test("options restores services hidden from the side panel header", async () => {
+test("options toggles quick access services in the side panel header", async () => {
   const document = createOptionsDocument();
   const storageData = {
     "anyside.settings": {
       defaultPresetId: "chatgpt",
       activePresetId: "chatgpt",
       customUrls: [],
-      serviceOrder: ["chatgpt", "claude", "gemini", "notebooklm"],
+      serviceOrder: ["chatgpt", "gemini", "claude", "perplexity", "notebooklm", "grok"],
       hiddenServiceIds: ["claude"],
+      quickAccessConfigured: true,
       lastUrlByPreset: {
         chatgpt: "https://chatgpt.com/",
-        claude: "https://claude.ai/",
         gemini: "https://gemini.google.com/",
+        claude: "https://claude.ai/",
         notebooklm: "https://notebooklm.google.com/",
+        perplexity: "https://www.perplexity.ai/",
+        grok: "https://grok.com/",
         custom: ""
       },
       enableFrameHeaderRelaxation: false,
@@ -26,6 +29,7 @@ test("options restores services hidden from the side panel header", async () => 
   globalThis.HTMLElement = FakeElement;
   globalThis.HTMLButtonElement = FakeButtonElement;
   globalThis.HTMLFormElement = FakeFormElement;
+  globalThis.HTMLInputElement = FakeInputElement;
   globalThis.HTMLImageElement = FakeImageElement;
   globalThis.document = document;
   globalThis.chrome = createChromeMock(storageData);
@@ -39,20 +43,30 @@ test("options restores services hidden from the side panel header", async () => 
     await import(`../dist/options/main.js?hidden-services-${Date.now()}`);
     await flushAsync();
 
-    assert.match(textTree(document.getElementById("hiddenServiceList")), /Show Claude/);
+    assert.match(textTree(document.getElementById("hiddenServiceList")), /Quick access/);
+    assert.match(textTree(document.getElementById("hiddenServiceList")), /Claude/);
+    assert.match(textTree(document.getElementById("hiddenServiceList")), /Grok/);
 
-    const restoreButton = findByDataset(document.getElementById("hiddenServiceList"), "restoreServiceId", "claude");
-    document.getElementById("hiddenServiceList").dispatch("click", { target: restoreButton });
+    const claudeToggle = findByDataset(document.getElementById("hiddenServiceList"), "quickAccessId", "claude");
+    claudeToggle.checked = true;
+    document.getElementById("hiddenServiceList").dispatch("change", { target: claudeToggle });
     await flushAsync();
 
     assert.deepEqual(storageData["anyside.settings"].hiddenServiceIds, []);
-    assert.doesNotMatch(textTree(document.getElementById("hiddenServiceList")), /Show Claude/);
+
+    const grokToggle = findByDataset(document.getElementById("hiddenServiceList"), "quickAccessId", "grok");
+    grokToggle.checked = false;
+    document.getElementById("hiddenServiceList").dispatch("change", { target: grokToggle });
+    await flushAsync();
+
+    assert.deepEqual(storageData["anyside.settings"].hiddenServiceIds, ["grok"]);
   } finally {
     delete globalThis.chrome;
     delete globalThis.document;
     delete globalThis.HTMLElement;
     delete globalThis.HTMLButtonElement;
     delete globalThis.HTMLFormElement;
+    delete globalThis.HTMLInputElement;
     delete globalThis.HTMLImageElement;
     delete globalThis.IntersectionObserver;
   }

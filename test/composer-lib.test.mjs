@@ -6,10 +6,18 @@ import { detectAIService, getPromptTemplate, PROMPT_TEMPLATES, renderContextTemp
 test("detectAIService maps known AI service URLs", () => {
   assert.equal(detectAIService("https://chatgpt.com/"), "chatgpt");
   assert.equal(detectAIService("https://chat.openai.chatgpt.com/"), "chatgpt");
-  assert.equal(detectAIService("https://claude.ai/new"), "claude");
   assert.equal(detectAIService("https://gemini.google.com/app"), "gemini");
+  assert.equal(detectAIService("https://claude.ai/new"), "claude");
   assert.equal(detectAIService("https://www.perplexity.ai/search"), "perplexity");
   assert.equal(detectAIService("https://notebooklm.google.com/notebook/example"), "notebooklm");
+  assert.equal(detectAIService("https://grok.com/"), "grok");
+  assert.equal(detectAIService("https://copilot.microsoft.com/chats/new"), "copilot");
+  assert.equal(detectAIService("https://chat.deepseek.com/"), "deepseek");
+  assert.equal(detectAIService("https://www.kimi.com/"), "kimi");
+  assert.equal(detectAIService("https://agent.minimax.io/"), "minimax");
+  assert.equal(detectAIService("https://chat.z.ai/"), "glm");
+  assert.equal(detectAIService("https://manus.im/"), "manus");
+  assert.equal(detectAIService("https://www.genspark.ai/"), "genspark");
   assert.equal(detectAIService("https://example.com/"), "unknown");
   assert.equal(detectAIService("not a url"), "unknown");
 });

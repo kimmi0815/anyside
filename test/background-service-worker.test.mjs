@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { FRAME_COMPATIBILITY_DOMAINS } from "../dist/shared/presets.js";
+
 let importCounter = 0;
 
 test("background routing does not send unknown custom URLs to the newest unrelated agent", async () => {
@@ -162,13 +164,7 @@ test("frame compatibility session creates and removes a scoped session rule", as
   assert.equal(sessionUpdates.length, 2);
   assert.deepEqual(sessionUpdates[0].removeRuleIds, [1001]);
   assert.equal(sessionUpdates[0].addRules.length, 1);
-  assert.deepEqual(sessionUpdates[0].addRules[0].condition.requestDomains.sort(), [
-    "chatgpt.com",
-    "claude.ai",
-    "gemini.google.com",
-    "notebooklm.google.com",
-    "www.perplexity.ai"
-  ].sort());
+  assert.deepEqual(sessionUpdates[0].addRules[0].condition.requestDomains.sort(), [...FRAME_COMPATIBILITY_DOMAINS].sort());
   assert.deepEqual(sessionUpdates[1], { removeRuleIds: [1001], addRules: [] });
 });
 

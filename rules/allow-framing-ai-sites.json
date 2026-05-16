@@ -21,7 +21,15 @@
         "claude.ai",
         "gemini.google.com",
         "www.perplexity.ai",
-        "notebooklm.google.com"
+        "notebooklm.google.com",
+        "grok.com",
+        "copilot.microsoft.com",
+        "chat.deepseek.com",
+        "www.kimi.com",
+        "agent.minimax.io",
+        "chat.z.ai",
+        "manus.im",
+        "www.genspark.ai"
       ],
       "resourceTypes": ["sub_frame"]
     }

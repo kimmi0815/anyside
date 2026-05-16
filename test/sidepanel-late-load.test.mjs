@@ -177,7 +177,19 @@ test("side panel service switcher loads registered services and custom URLs", as
         "custom:research": "https://research.example.com/"
       },
       serviceOrder: ["claude", "chatgpt", "custom:research", "gemini", "perplexity", "notebooklm"],
-      hiddenServiceIds: [],
+      hiddenServiceIds: [
+        "perplexity",
+        "notebooklm",
+        "grok",
+        "copilot",
+        "deepseek",
+        "kimi",
+        "minimax",
+        "glm",
+        "manus",
+        "genspark"
+      ],
+      quickAccessConfigured: true,
       enableFrameHeaderRelaxation: false,
       frameHeaderRelaxationAcknowledged: false,
       diagnostics: {}
@@ -215,12 +227,13 @@ test("side panel service switcher loads registered services and custom URLs", as
     await flushAsync();
 
     assert.match(textTree(document.getElementById("serviceSwitcher")), /ChatGPT/);
-    assert.match(textTree(document.getElementById("serviceSwitcher")), /Perplexity/);
+    assert.match(textTree(document.getElementById("serviceSwitcher")), /Gemini/);
     assert.match(textTree(document.getElementById("serviceSwitcher")), /Research/);
+    assert.doesNotMatch(textTree(document.getElementById("serviceSwitcher")), /Perplexity/);
     assert.doesNotMatch(textTree(document.getElementById("serviceSwitcher")), /Google Keep/);
     assert.deepEqual(
       document.getElementById("serviceSwitcher").children.map((child) => child.dataset.presetId),
-      ["claude", "chatgpt", "custom:research", "gemini", "perplexity", "notebooklm"]
+      ["claude", "chatgpt", "custom:research", "gemini"]
     );
     assert.equal(document.getElementById("serviceSwitcher").children[0].dataset.presetId, "claude");
     assert.equal(document.getElementById("moreActionsButton").hidden, false);

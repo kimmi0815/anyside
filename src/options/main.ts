@@ -52,12 +52,12 @@ async function init(): Promise<void> {
 }
 
 function bindEvents(): void {
-  hiddenServiceList.addEventListener("click", (event) => {
+  hiddenServiceList.addEventListener("change", (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLButtonElement) || !target.dataset.restoreServiceId) {
+    if (!(target instanceof HTMLInputElement) || !target.dataset.quickAccessId) {
       return;
     }
-    void restoreHiddenService(target.dataset.restoreServiceId as ActivePresetId);
+    void setQuickAccessVisible(target.dataset.quickAccessId as ActivePresetId, target.checked);
   });
 
   customUrlForm.addEventListener("submit", (event) => {
@@ -207,7 +207,7 @@ function observeSections(): void {
 }
 
 function render(): void {
-  renderHiddenServices();
+  renderQuickAccessServices();
   renderCustomUrls();
   renderPromptTemplates();
 }
@@ -219,29 +219,45 @@ function renderVersion(): void {
   }
 }
 
-function renderHiddenServices(): void {
+function renderQuickAccessServices(): void {
   hiddenServiceList.textContent = "";
-  const hiddenServices = settings.hiddenServiceIds
-    .map((id) => ({ id, label: serviceLabel(id) }))
-    .filter((item) => item.label);
-  if (hiddenServices.length === 0) {
-    return;
-  }
 
   const title = document.createElement("p");
   title.className = "hint";
-  title.textContent = "Hidden from header";
+  title.textContent = "Quick access";
   hiddenServiceList.append(title);
 
   const list = document.createElement("div");
-  list.className = "restore-list";
-  for (const service of hiddenServices) {
-    const button = document.createElement("button");
-    button.className = "button subtle";
-    button.type = "button";
-    button.dataset.restoreServiceId = service.id;
-    button.textContent = `Show ${service.label}`;
-    list.append(button);
+  list.className = "quick-access-list";
+  const visibleCount = visibleQuickAccessCount();
+  for (const service of quickAccessOptions()) {
+    const visible = isQuickAccessVisible(service.id);
+    const row = document.createElement("label");
+    row.className = "quick-access-row";
+
+    const icon = createEntryIcon(service.iconUrl, serviceInitial(service.label));
+    row.append(icon);
+
+    const copy = document.createElement("span");
+    copy.className = "quick-access-copy";
+    const name = document.createElement("strong");
+    name.textContent = service.label;
+    const url = document.createElement("span");
+    url.textContent = service.url;
+    copy.append(name, url);
+    row.append(copy);
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = visible;
+    checkbox.dataset.quickAccessId = service.id;
+    checkbox.setAttribute("aria-label", `${visible ? "Hide" : "Show"} ${service.label} in the side panel header`);
+    if (visible && visibleCount <= 1) {
+      checkbox.disabled = true;
+      checkbox.title = "Keep at least one service in quick access.";
+    }
+    row.append(checkbox);
+    list.append(row);
   }
   hiddenServiceList.append(list);
 }
@@ -751,25 +767,61 @@ async function migrateBareCustomDefault(): Promise<void> {
   void refreshIconForCustomUrl(id, url);
 }
 
-async function restoreHiddenService(id: ActivePresetId): Promise<void> {
-  settings.hiddenServiceIds = settings.hiddenServiceIds.filter((serviceId) => serviceId !== id);
-  if (!settings.serviceOrder.includes(id)) {
-    settings.serviceOrder.push(id);
+async function setQuickAccessVisible(id: ActivePresetId, visible: boolean): Promise<void> {
+  if (visible) {
+    settings.hiddenServiceIds = settings.hiddenServiceIds.filter((serviceId) => serviceId !== id);
+    if (!settings.serviceOrder.includes(id)) {
+      settings.serviceOrder.push(id);
+    }
+    settings = await saveSettings(settings);
+    setStatus("Service added to quick access.");
+    render();
+    return;
+  }
+
+  if (visibleQuickAccessCount() <= 1 && isQuickAccessVisible(id)) {
+    setStatus("Keep at least one service in quick access.");
+    render();
+    return;
+  }
+
+  if (!settings.hiddenServiceIds.includes(id)) {
+    settings.hiddenServiceIds.push(id);
   }
   settings = await saveSettings(settings);
-  setStatus("Service restored to the header.");
+  setStatus("Service hidden from quick access.");
   render();
 }
 
-function serviceLabel(id: ActivePresetId): string {
-  const builtIn = BUILT_IN_PRESETS.find((preset) => preset.id === id);
-  if (builtIn) {
-    return builtIn.label;
-  }
+function isQuickAccessVisible(id: ActivePresetId): boolean {
+  return !settings.hiddenServiceIds.includes(id);
+}
 
-  const customId = id.startsWith("custom:") ? id.slice("custom:".length) : "";
-  const customUrl = settings.customUrls.find((entry) => entry.id === customId);
-  return customUrl?.label || "";
+function visibleQuickAccessCount(): number {
+  return quickAccessOptions().filter((service) => isQuickAccessVisible(service.id)).length;
+}
+
+function quickAccessOptions(): { id: ActivePresetId; label: string; url: string; iconUrl?: string }[] {
+  const custom = settings.customUrls.map((customUrl) => ({
+    id: makeCustomPresetId(customUrl.id),
+    label: customUrl.label,
+    url: customUrl.url,
+    iconUrl: customUrl.iconUrl
+  }));
+  const builtIns = BUILT_IN_PRESETS.map((preset) => ({
+    id: preset.id,
+    label: preset.label,
+    url: settings.lastUrlByPreset[preset.id] || preset.url,
+    iconUrl: undefined
+  }));
+  const byId = new Map<ActivePresetId, { id: ActivePresetId; label: string; url: string; iconUrl?: string }>(
+    [...builtIns, ...custom].map((service) => [service.id, service])
+  );
+  const orderedIds = [
+    ...settings.serviceOrder.filter((id) => byId.has(id)),
+    ...[...byId.keys()].filter((id) => !settings.serviceOrder.includes(id))
+  ];
+  return orderedIds.map((id) => byId.get(id)).filter((service): service is { id: ActivePresetId; label: string; url: string; iconUrl?: string } => !!service);
 }
 
 function serviceInitial(label: string): string {

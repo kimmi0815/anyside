@@ -1,4 +1,12 @@
-import { BUILT_IN_PRESETS, CUSTOM_PRESET_ID, DEFAULT_PRESET_ID, isBuiltInPresetId, makeCustomPresetId, parseCustomPresetId } from "./presets.js";
+import {
+  BUILT_IN_PRESETS,
+  CUSTOM_PRESET_ID,
+  DEFAULT_HIDDEN_PRESET_IDS,
+  DEFAULT_PRESET_ID,
+  isBuiltInPresetId,
+  makeCustomPresetId,
+  parseCustomPresetId
+} from "./presets.js";
 import type { ActivePresetId, CustomUrl, DiagnosticEntry, DiagnosticStatus, Settings, SidePanelChromeSettings } from "./types.js";
 import { normalizeUserUrl } from "./url.js";
 
@@ -20,7 +28,8 @@ export function defaultSettings(): Settings {
     activePresetId: DEFAULT_PRESET_ID,
     customUrls: [],
     serviceOrder: BUILT_IN_PRESETS.map((preset) => preset.id),
-    hiddenServiceIds: [],
+    hiddenServiceIds: [...DEFAULT_HIDDEN_PRESET_IDS],
+    quickAccessConfigured: true,
     sidePanelChrome: {
       headerCollapsed: false,
       footerCollapsed: false
@@ -259,7 +268,15 @@ export function normalizeSettings(value: unknown): Settings {
   const defaultPresetId = normalizeActivePresetId(input.defaultPresetId, defaults.defaultPresetId, customUrls);
   const activePresetId = normalizeActivePresetId(input.activePresetId, defaultPresetId, customUrls);
   const serviceOrder = normalizeServiceIdList(input.serviceOrder, customUrls, { appendMissing: true });
+  const quickAccessConfigured = input.quickAccessConfigured === true;
   let hiddenServiceIds = normalizeServiceIdList(input.hiddenServiceIds, customUrls, { appendMissing: false });
+  if (!quickAccessConfigured) {
+    for (const id of DEFAULT_HIDDEN_PRESET_IDS) {
+      if (!hiddenServiceIds.includes(id)) {
+        hiddenServiceIds.push(id);
+      }
+    }
+  }
   if (serviceOrder.every((id) => hiddenServiceIds.includes(id))) {
     hiddenServiceIds = hiddenServiceIds.filter((id) => id !== DEFAULT_PRESET_ID);
   }
@@ -277,6 +294,7 @@ export function normalizeSettings(value: unknown): Settings {
     customUrls,
     serviceOrder,
     hiddenServiceIds,
+    quickAccessConfigured: true,
     sidePanelChrome: normalizeSidePanelChrome(input.sidePanelChrome),
     lastUrlByPreset: normalizeLastUrlByPreset(input.lastUrlByPreset, customUrls),
     enableFrameHeaderRelaxation,

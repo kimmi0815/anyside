@@ -4,6 +4,33 @@ import { afterEach, test } from "node:test";
 import { defaultSettings, getSettings, normalizeSettings, SETTINGS_KEY } from "../dist/shared/storage.js";
 
 const LEGACY_SETTINGS_KEY = "aiSidecar.settings";
+const BUILT_IN_ORDER = [
+  "chatgpt",
+  "gemini",
+  "claude",
+  "perplexity",
+  "notebooklm",
+  "grok",
+  "copilot",
+  "deepseek",
+  "kimi",
+  "minimax",
+  "glm",
+  "manus",
+  "genspark"
+];
+const DEFAULT_HIDDEN = [
+  "perplexity",
+  "notebooklm",
+  "grok",
+  "copilot",
+  "deepseek",
+  "kimi",
+  "minimax",
+  "glm",
+  "manus",
+  "genspark"
+];
 
 afterEach(() => {
   delete globalThis.chrome;
@@ -77,8 +104,9 @@ test("normalizeSettings keeps valid custom settings and drops invalid entries", 
       createdAt: 7
     }
   ]);
-  assert.deepEqual(settings.serviceOrder, ["custom:docs", "chatgpt", "claude", "gemini", "perplexity", "notebooklm"]);
-  assert.deepEqual(settings.hiddenServiceIds, ["gemini"]);
+  assert.deepEqual(settings.serviceOrder, ["custom:docs", "chatgpt", "claude", ...BUILT_IN_ORDER.filter((id) => !["chatgpt", "claude"].includes(id))]);
+  assert.deepEqual(settings.hiddenServiceIds, ["gemini", ...DEFAULT_HIDDEN]);
+  assert.equal(settings.quickAccessConfigured, true);
   assert.deepEqual(settings.sidePanelChrome, {
     headerCollapsed: false,
     footerCollapsed: false
@@ -113,8 +141,9 @@ test("normalizeSettings migrates removed Keep selections and invalid icon URLs",
   assert.equal(settings.defaultPresetId, "chatgpt");
   assert.equal(settings.activePresetId, "chatgpt");
   assert.equal(settings.customUrls[0].iconUrl, undefined);
-  assert.deepEqual(settings.serviceOrder, ["chatgpt", "claude", "gemini", "perplexity", "notebooklm", "custom:bad-icon"]);
-  assert.deepEqual(settings.hiddenServiceIds, []);
+  assert.deepEqual(settings.serviceOrder, [...BUILT_IN_ORDER, "custom:bad-icon"]);
+  assert.deepEqual(settings.hiddenServiceIds, DEFAULT_HIDDEN);
+  assert.equal(settings.quickAccessConfigured, true);
 });
 
 test("normalizeSettings keeps valid side panel chrome settings and drops invalid values", () => {
@@ -141,8 +170,9 @@ test("frame header relaxation is off by default and old implicit true settings m
   const defaults = defaultSettings();
   assert.equal(defaults.enableFrameHeaderRelaxation, false);
   assert.equal(defaults.frameHeaderRelaxationAcknowledged, false);
-  assert.deepEqual(defaults.serviceOrder, ["chatgpt", "claude", "gemini", "perplexity", "notebooklm"]);
-  assert.deepEqual(defaults.hiddenServiceIds, []);
+  assert.deepEqual(defaults.serviceOrder, BUILT_IN_ORDER);
+  assert.deepEqual(defaults.hiddenServiceIds, DEFAULT_HIDDEN);
+  assert.equal(defaults.quickAccessConfigured, true);
   assert.deepEqual(defaults.sidePanelChrome, {
     headerCollapsed: false,
     footerCollapsed: false

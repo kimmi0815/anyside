@@ -1,4 +1,18 @@
-export type AIService = "chatgpt" | "claude" | "gemini" | "perplexity" | "notebooklm" | "unknown";
+export type AIService =
+  | "chatgpt"
+  | "gemini"
+  | "claude"
+  | "perplexity"
+  | "notebooklm"
+  | "grok"
+  | "copilot"
+  | "deepseek"
+  | "kimi"
+  | "minimax"
+  | "glm"
+  | "manus"
+  | "genspark"
+  | "unknown";
 
 export type AIInputService = AIService;
 
