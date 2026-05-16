@@ -33,6 +33,7 @@ export type CustomUrl = {
 };
 
 export type DiagnosticStatus = "untested" | "pending" | "loaded" | "timeout" | "manual-pass" | "manual-fail";
+export type LanguageSetting = "auto" | "en" | "ja";
 
 export type DiagnosticEntry = {
   presetId: PresetId;
@@ -50,6 +51,7 @@ export type SidePanelChromeSettings = {
 };
 
 export type Settings = {
+  language: LanguageSetting;
   defaultPresetId: ActivePresetId;
   activePresetId: ActivePresetId;
   customUrls: CustomUrl[];

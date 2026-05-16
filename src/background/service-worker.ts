@@ -2,9 +2,10 @@ import { Messages } from "../shared/messages.js";
 import { detectAIService } from "../features/composer/lib/aiService.js";
 import { FRAME_COMPATIBILITY_DOMAINS, isBuiltInPresetId } from "../shared/presets.js";
 import { createActiveTabPrompt, createSelectionPrompt } from "../shared/prompt.js";
-import { FALLBACK_WINDOW_KEY, getSettings } from "../shared/storage.js";
+import { FALLBACK_WINDOW_KEY, getSettings, SETTINGS_KEY } from "../shared/storage.js";
+import { resolveLanguage, t, type ResolvedLanguage } from "../shared/i18n.js";
 import type { AIInputInsertReason, AIService, InsertResult, PageContext } from "../features/composer/types.js";
-import type { FallbackWindowState, PresetId, RuntimeMessage, RuntimeResponse } from "../shared/types.js";
+import type { FallbackWindowState, PresetId, RuntimeMessage, RuntimeResponse, Settings } from "../shared/types.js";
 
 const DNR_RULESET_ID = "allow_framing_ai_sites";
 const DNR_SESSION_RULE_ID = 1001;
@@ -172,6 +173,17 @@ chrome.windows.onRemoved.addListener((windowId) => {
   void clearFallbackWindowIfNeeded(windowId);
 });
 
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[SETTINGS_KEY]) {
+    return;
+  }
+  const oldLanguage = languageFromSettings(changes[SETTINGS_KEY].oldValue as Partial<Settings> | undefined);
+  const newLanguage = languageFromSettings(changes[SETTINGS_KEY].newValue as Partial<Settings> | undefined);
+  if (oldLanguage !== newLanguage) {
+    void createContextMenus();
+  }
+});
+
 void ensureInitialized();
 
 async function initializeExtension(options: { resetMenus: boolean }): Promise<void> {
@@ -192,15 +204,16 @@ async function configureSidePanel(): Promise<void> {
 }
 
 async function createContextMenus(): Promise<void> {
+  const language = await getResolvedLanguage();
   await chrome.contextMenus.removeAll();
   chrome.contextMenus.create({
     id: MENU_SELECTION_ID,
-    title: "Ask anyside about selection",
+    title: t(language, "background.menuSelection"),
     contexts: ["selection"]
   });
   chrome.contextMenus.create({
     id: MENU_OPEN_ID,
-    title: "Open anyside",
+    title: t(language, "background.menuOpen"),
     contexts: ["all"]
   });
 }
@@ -225,15 +238,16 @@ async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runt
 
     case Messages.COPY_ACTIVE_TAB_PROMPT: {
       const tab = await getActiveTab();
-      const text = createActiveTabPrompt(tab?.title, tab?.url);
+      const language = await getResolvedLanguage();
+      const text = createActiveTabPrompt(tab?.title, tab?.url, language);
       await copyText(text);
-      await flashBadge("Copied");
+      await flashBadge(t(language, "common.copied"));
       return { ok: true, text };
     }
 
     case Messages.COPY_TEXT: {
       await copyText(message.text);
-      await flashBadge("Copied");
+      await flashBadge(t(await getResolvedLanguage(), "common.copied"));
       return { ok: true, text: message.text };
     }
 
@@ -338,6 +352,7 @@ async function insertTextIntoAI(
   url: string,
   sender?: chrome.runtime.MessageSender
 ): Promise<InsertResult> {
+  const language = await getResolvedLanguage();
   const selection = await findAiInputAgent({
     service,
     url,
@@ -354,33 +369,33 @@ async function insertTextIntoAI(
         method: "direct",
         service: selection.agent.service,
         reason: "inserted",
-        message: "Inserted into AI input."
+        message: t(language, "background.inserted")
       };
     }
 
     await copyText(text);
-    await flashBadge("Copied");
+    await flashBadge(t(language, "common.copied"));
     return {
       success: true,
       method: "clipboard",
       service,
       reason: result.reason,
       message: result.reason === "no-input"
-        ? "入力欄が見つからないためコピーしました"
-        : "入力欄へ挿入できないためコピーしました"
+        ? t(language, "side.noInputCopied")
+        : t(language, "side.insertFailedCopied")
     };
   }
 
   await copyText(text);
-  await flashBadge("Copied");
+  await flashBadge(t(language, "common.copied"));
   return {
     success: true,
     method: "clipboard",
     service,
     reason: "agent-unavailable",
     message: selection.status === "ambiguous"
-      ? "AIページを特定できないためコピーしました"
-      : "AIページと接続できないためコピーしました"
+      ? t(language, "side.ambiguousCopied")
+      : t(language, "side.aiDisconnected")
   };
 }
 
@@ -657,16 +672,26 @@ async function handleSelectionContextMenu(selectionText: string, tab?: chrome.ta
   const panelPromise = tab?.windowId !== undefined
     ? openSidePanel(tab.windowId).catch(() => undefined)
     : Promise.resolve();
-  const text = createSelectionPrompt(selectionText);
+  const language = await getResolvedLanguage();
+  const text = createSelectionPrompt(selectionText, language);
   try {
     await copyText(text, tab);
-    await flashBadge("Copied").catch(() => undefined);
+    await flashBadge(t(language, "common.copied")).catch(() => undefined);
   } catch (error) {
     console.warn("Failed to copy context menu prompt.", error);
-    await flashBadge("Error").catch(() => undefined);
+    await flashBadge(t(language, "common.error")).catch(() => undefined);
   } finally {
     await panelPromise;
   }
+}
+
+async function getResolvedLanguage(): Promise<ResolvedLanguage> {
+  const settings = await getSettings();
+  return languageFromSettings(settings);
+}
+
+function languageFromSettings(settings: Partial<Settings> | undefined): ResolvedLanguage {
+  return resolveLanguage(settings?.language, chrome.i18n?.getUILanguage?.() || "");
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {

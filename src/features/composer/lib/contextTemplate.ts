@@ -1,4 +1,6 @@
 import type { ContextMode, PageContext } from "../types.js";
+import type { ResolvedLanguage } from "../../../shared/i18n.js";
+import { t } from "../../../shared/i18n.js";
 
 export type ContextAction = {
   mode: ContextMode;
@@ -15,7 +17,14 @@ export const CONTEXT_ACTIONS: ContextAction[] = [
   { mode: "summarize_page", label: "このページを要約" }
 ];
 
-export function renderContextTemplate(context: PageContext, mode: ContextMode): string {
+export function getContextActions(language: ResolvedLanguage): ContextAction[] {
+  return CONTEXT_ACTIONS.map((action) => ({
+    ...action,
+    label: t(language, `context.action.${action.mode}` as Parameters<typeof t>[1])
+  }));
+}
+
+export function renderContextTemplate(context: PageContext, mode: ContextMode, language: ResolvedLanguage = "ja"): string {
   const title = context.title.trim();
   const url = context.url.trim();
   const selection = context.selection.trim();
@@ -25,51 +34,51 @@ export function renderContextTemplate(context: PageContext, mode: ContextMode): 
       return url;
     case "title_url":
       return compact([
-        "タイトル:",
+        t(language, "context.label.title"),
         title,
         "",
-        "URL:",
+        t(language, "context.label.url"),
         url
       ]);
     case "selection":
       return selection;
     case "full_context":
       return withOptionalSelection([
-        "このページについて扱います。",
+        t(language, "context.fullIntro"),
         "",
-        "タイトル:",
+        t(language, "context.label.title"),
         title,
         "",
-        "URL:",
+        t(language, "context.label.url"),
         url
-      ], selection);
+      ], selection, language);
     case "ask_about_page":
       return withOptionalSelection([
-        "このページについて質問します。",
+        t(language, "context.askIntro"),
         "",
-        "タイトル:",
+        t(language, "context.label.title"),
         title,
         "",
-        "URL:",
+        t(language, "context.label.url"),
         url
-      ], selection, "質問:");
+      ], selection, language, t(language, "context.question"));
     case "summarize_page":
       return withOptionalSelection([
-        "次のページをわかりやすく要約してください。",
+        t(language, "context.summarizeIntro"),
         "",
-        "タイトル:",
+        t(language, "context.label.title"),
         title,
         "",
-        "URL:",
+        t(language, "context.label.url"),
         url
-      ], selection);
+      ], selection, language);
   }
 }
 
-function withOptionalSelection(lines: string[], selection: string, trailingLine?: string): string {
+function withOptionalSelection(lines: string[], selection: string, language: ResolvedLanguage, trailingLine?: string): string {
   const output = [...lines];
   if (selection) {
-    output.push("", "選択範囲:", selection);
+    output.push("", t(language, "context.label.selection"), selection);
   }
   if (trailingLine) {
     output.push("", trailingLine);

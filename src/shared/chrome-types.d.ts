@@ -36,6 +36,10 @@ declare namespace chrome {
     function getManifest(): { version?: string; name?: string; [key: string]: unknown };
   }
 
+  namespace i18n {
+    function getUILanguage(): string;
+  }
+
   namespace action {
     function setBadgeText(details: { text: string }): Promise<void>;
     function setBadgeBackgroundColor(details: { color: string }): Promise<void>;

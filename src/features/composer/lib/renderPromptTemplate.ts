@@ -1,10 +1,12 @@
 import type { AIService, PageContext } from "../types.js";
-export function renderPromptTemplate(body: string, context: PageContext, service: AIService): string {
+import { dateLocale, type ResolvedLanguage } from "../../../shared/i18n.js";
+
+export function renderPromptTemplate(body: string, context: PageContext, service: AIService, language: ResolvedLanguage = "ja"): string {
   const replacements: Record<string, string> = {
     title: context.title || "",
     url: context.url || "",
     selection: context.selection || "",
-    date: currentDate(),
+    date: currentDate(language),
     service
   };
 
@@ -14,6 +16,6 @@ export function renderPromptTemplate(body: string, context: PageContext, service
     .trim();
 }
 
-function currentDate(): string {
-  return new Date().toLocaleDateString("ja-JP");
+function currentDate(language: ResolvedLanguage): string {
+  return new Date().toLocaleDateString(dateLocale(language));
 }

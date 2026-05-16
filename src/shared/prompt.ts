@@ -1,7 +1,9 @@
-export function createSelectionPrompt(selectionText: string): string {
+import { t, type ResolvedLanguage } from "./i18n.js";
+
+export function createSelectionPrompt(selectionText: string, language: ResolvedLanguage = "en"): string {
   return [
-    "Please explain the following text clearly.",
-    "If helpful, include a concise summary, key terms, caveats, and possible counterarguments.",
+    t(language, "prompt.selectionIntro"),
+    t(language, "prompt.selectionDetail"),
     "",
     "---",
     selectionText.trim(),
@@ -9,15 +11,15 @@ export function createSelectionPrompt(selectionText: string): string {
   ].join("\n");
 }
 
-export function createActiveTabPrompt(title: string | undefined, url: string | undefined): string {
+export function createActiveTabPrompt(title: string | undefined, url: string | undefined, language: ResolvedLanguage = "en"): string {
   return [
-    "Please review this web page and explain the main points.",
-    "If useful, include context, important details, and what I should investigate next.",
+    t(language, "prompt.activeTabIntro"),
+    t(language, "prompt.activeTabDetail"),
     "",
-    "Title:",
-    title || "(No title)",
+    t(language, "context.label.title"),
+    title || t(language, "prompt.noTitle"),
     "",
-    "URL:",
-    url || "(No URL)"
+    t(language, "context.label.url"),
+    url || t(language, "prompt.noUrl")
   ].join("\n");
 }

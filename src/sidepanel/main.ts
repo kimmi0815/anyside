@@ -1,8 +1,9 @@
 import { Messages } from "../shared/messages.js";
-import { CONTEXT_ACTIONS, PROMPT_TEMPLATES, detectAIService, renderContextTemplate, renderPromptTemplate } from "../features/composer/index.js";
+import { PROMPT_TEMPLATES, detectAIService, getContextActions, renderContextTemplate, renderPromptTemplate } from "../features/composer/index.js";
 import { BUILT_IN_PRESETS, FRAME_COMPATIBILITY_DOMAINS, diagnosticKey, isBuiltInPresetId, makeCustomPresetId, resolveTarget } from "../shared/presets.js";
 import { getSettings, normalizeSettings, saveSettings, SETTINGS_KEY } from "../shared/storage.js";
 import { CUSTOM_PROMPT_TEMPLATES_KEY, getCustomPromptTemplates } from "../storage/promptTemplateStorage.js";
+import { resolveLanguage, t, type ResolvedLanguage } from "../shared/i18n.js";
 import type { AIService, ContextMode, PageContext, PromptTemplate } from "../features/composer/types.js";
 import type { ActivePresetId, DiagnosticEntry, DiagnosticStatus, PresetId, RuntimeMessage, RuntimeResponse, Settings } from "../shared/types.js";
 
@@ -44,7 +45,9 @@ let aiFrame = element<HTMLIFrameElement>("aiFrame");
 const dismissLayer = element<HTMLButtonElement>("dismissLayer");
 const fallbackPanel = element<HTMLElement>("fallbackPanel");
 const fallbackServiceName = element<HTMLElement>("fallbackServiceName");
+const fallbackTitleSuffix = element<HTMLElement>("fallbackTitleSuffix");
 const fallbackReason = element<HTMLElement>("fallbackReason");
+const fallbackNote = element<HTMLElement>("fallbackNote");
 const fallbackOpenTabButton = element<HTMLButtonElement>("fallbackOpenTabButton");
 const fallbackOpenWindowButton = element<HTMLButtonElement>("fallbackOpenWindowButton");
 const fallbackReloadButton = element<HTMLButtonElement>("fallbackReloadButton");
@@ -79,6 +82,7 @@ type ActiveDiagnostic = {
 };
 
 let settings: Settings;
+let uiLanguage: ResolvedLanguage = "en";
 let currentUrl = "";
 let currentLabel = "";
 let loadToken = 0;
@@ -107,6 +111,7 @@ void init();
 async function init(): Promise<void> {
   diagnosticsDetails.hidden = !diagnosticsEnabled;
   settings = await getSettings();
+  uiLanguage = resolveUiLanguage();
   await loadPromptTemplates();
   syncSettingsUi();
   bindEvents();
@@ -203,6 +208,7 @@ function bindEvents(): void {
     const previousDefaultPresetId = settings.defaultPresetId;
     const previousConfiguredTarget = resolveTarget(settings, settings.defaultPresetId);
     settings = normalizeSettings(changes[SETTINGS_KEY].newValue);
+    uiLanguage = resolveUiLanguage();
     syncSettingsUi();
 
     if (isDiagnosticBusy()) {
@@ -385,15 +391,15 @@ function syncDismissLayer(): void {
 function renderContextActions(context: PageContext): void {
   contextActions.textContent = "";
   const selectionLength = context.selection.trim().length;
-  contextSummary.textContent = selectionLength > 0 ? `選択中: ${selectionLength}文字` : "選択テキストなし";
+  contextSummary.textContent = selectionLength > 0 ? tr("side.selectionSummary", { count: selectionLength }) : tr("side.noSelection");
 
-  for (const action of CONTEXT_ACTIONS) {
+  for (const action of getContextActions(uiLanguage)) {
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.mode = action.mode;
     button.textContent = action.label;
     if (action.requiresSelection && selectionLength === 0) {
-      button.title = "選択テキストがありません";
+      button.title = tr("side.noSelectionTitle");
       button.disabled = true;
       button.setAttribute("aria-disabled", "true");
     }
@@ -404,13 +410,13 @@ function renderContextActions(context: PageContext): void {
 async function handleContextAction(mode: ContextMode): Promise<void> {
   const context = lastContext || await collectPageContext();
   if (mode === "selection" && !context.selection.trim()) {
-    showToast("選択テキストがありません");
+    showToast(tr("side.noSelectionTitle"));
     return;
   }
 
-  const text = renderContextTemplate(context, mode);
+  const text = renderContextTemplate(context, mode, uiLanguage);
   if (!text) {
-    showToast("このページではContextを取得できません");
+    showToast(tr("side.contextUnavailable"));
     return;
   }
 
@@ -445,7 +451,7 @@ function renderPromptList(): void {
   if (templates.length === 0) {
     const empty = document.createElement("div");
     empty.className = "composer-empty";
-    empty.textContent = promptTemplates.length === 0 ? "OptionsでPromptを追加してください" : "一致するPromptがありません";
+    empty.textContent = promptTemplates.length === 0 ? tr("side.noPrompts") : tr("side.noPromptMatches");
     promptList.append(empty);
     return;
   }
@@ -466,7 +472,7 @@ function renderPromptList(): void {
 
     const meta = document.createElement("span");
     meta.className = "prompt-row-meta";
-    meta.textContent = `${recentIds.includes(template.id) ? "最近使用 · " : ""}${template.category}`;
+    meta.textContent = `${recentIds.includes(template.id) ? `${tr("side.recent")} · ` : ""}${template.category}`;
 
     row.append(title, meta);
     promptList.append(row);
@@ -530,11 +536,11 @@ async function handlePromptSelection(templateId: string): Promise<void> {
 
   const context = await collectPageContext();
   const service = currentAIService();
-  const text = renderPromptTemplate(template.body, context, service);
+  const text = renderPromptTemplate(template.body, context, service, uiLanguage);
   rememberPromptTemplate(template.id);
   closePromptPalette();
   const result = await insertIntoAI(text);
-  showToast(result.method === "direct" ? "Promptを挿入しました" : result.message || "Promptをコピーしました");
+  showToast(result.method === "direct" ? tr("side.promptInserted") : result.message || tr("side.promptCopied"));
   setComposerExpanded(false);
 }
 
@@ -586,7 +592,7 @@ async function insertIntoAI(text: string) {
       method: "clipboard" as const,
       service,
       reason: "agent-unavailable" as const,
-      message: response.error || "AIページと接続できないためコピーしました"
+      message: response.error || tr("side.aiDisconnected")
     };
   }
 
@@ -595,7 +601,7 @@ async function insertIntoAI(text: string) {
     method: "clipboard" as const,
     service,
     reason: "agent-unavailable" as const,
-    message: response.error || "クリップボードへコピーできませんでした"
+    message: response.error || tr("side.copyFailed")
   };
 }
 
@@ -617,18 +623,18 @@ function currentAIService(): AIService {
 
 function contextToastMessage(mode: ContextMode, result: { method: "direct" | "clipboard"; message?: string }): string {
   if (result.method === "clipboard") {
-    return result.message || "入力欄が見つからないためコピーしました";
+    return result.message || tr("side.noInputCopied");
   }
 
   switch (mode) {
     case "url":
-      return "URLを挿入しました";
+      return uiLanguage === "ja" ? "URLを挿入しました" : "Inserted URL.";
     case "title_url":
     case "selection":
     case "full_context":
     case "ask_about_page":
     case "summarize_page":
-      return "入力欄に挿入しました";
+      return uiLanguage === "ja" ? "入力欄に挿入しました" : "Inserted into the input.";
   }
 }
 
@@ -679,7 +685,7 @@ async function loadConfiguredTarget(): Promise<void> {
 
 async function selectService(presetId: string): Promise<void> {
   if (isDiagnosticBusy()) {
-    setStatus("Finish the active diagnostic before switching services.", "diagnostic");
+    setStatus(uiLanguage === "ja" ? "診断中はサービスを切り替えられません。" : "Finish the active diagnostic before switching services.", "diagnostic");
     return;
   }
 
@@ -710,7 +716,7 @@ async function moveService(sourceId: ActivePresetId, targetId: string): Promise<
   settings.serviceOrder = orderedIds;
   settings = await saveSettings(settings);
   renderServiceSwitcher();
-  setStatus("Service order saved.");
+  setStatus(tr("side.orderSaved"));
 }
 
 async function hideService(serviceId: ActivePresetId): Promise<void> {
@@ -723,7 +729,7 @@ async function hideService(serviceId: ActivePresetId): Promise<void> {
   const visibleOptions = serviceOptions().filter((option) => option.id !== serviceId);
   if (visibleOptions.length === 0) {
     settings.hiddenServiceIds = settings.hiddenServiceIds.filter((id) => id !== serviceId);
-    setStatus("Keep at least one service in the header.");
+    setStatus(tr("side.keepOneHeader"));
     return;
   }
 
@@ -732,14 +738,14 @@ async function hideService(serviceId: ActivePresetId): Promise<void> {
     if (fallback) {
       settings.defaultPresetId = fallback.id;
       await loadTarget(fallback.id, fallback.label, fallback.url, { forceSave: true });
-      setStatus(`${fallback.label} is now shown.`);
+      setStatus(tr("side.serviceShown", { label: fallback.label }));
       return;
     }
   }
 
   settings = await saveSettings(settings);
   renderServiceSwitcher();
-  setStatus("Service hidden from header.");
+  setStatus(tr("side.serviceHidden"));
 }
 
 function openServiceMenu(serviceId: string): void {
@@ -749,7 +755,7 @@ function openServiceMenu(serviceId: string): void {
   }
 
   menuServiceId = option.id;
-  hideServiceButton.textContent = `Hide ${option.label}`;
+  hideServiceButton.textContent = uiLanguage === "ja" ? `${option.label}を非表示` : `Hide ${option.label}`;
   serviceMenu.hidden = false;
 }
 
@@ -809,7 +815,7 @@ async function loadUrl(label: string, url: string, options: LoadOptions): Promis
     fallbackPanel.hidden = false;
     if (options.diagnostic) {
       completedLoadToken = token;
-      updateActiveDiagnostic("timeout", "Timed out waiting for the frame to load.");
+      updateActiveDiagnostic("timeout", uiLanguage === "ja" ? "フレームの読み込みが時間内に完了しませんでした。" : "Timed out waiting for the frame to load.");
     }
   }, LOAD_TIMEOUT_MS);
 
@@ -828,7 +834,7 @@ async function showSetupState(): Promise<void> {
   fallbackPanel.hidden = true;
   setupPanel.hidden = false;
   setLoading(false);
-  setStatus("Choose a side panel service in Options.", "idle");
+  setStatus(tr("side.chooseService"), "idle");
   aiFrame.src = "about:blank";
   await endActiveFrameCompatibilitySession();
   if (settings.activePresetId !== settings.defaultPresetId) {
@@ -864,10 +870,10 @@ async function handleFrameError(token: number): Promise<void> {
   fallbackReason.textContent = defaultFallbackReason();
   fallbackPanel.hidden = false;
   if (activeDiagnostic?.token === token) {
-    updateActiveDiagnostic("manual-fail", "Frame failed to load.");
+    updateActiveDiagnostic("manual-fail", uiLanguage === "ja" ? "フレームの読み込みに失敗しました。" : "Frame failed to load.");
     return;
   }
-  setStatus(`${currentLabel || "Service"} failed to load.`, "warning");
+  setStatus(tr("side.loadFailed", { label: currentLabel || "Service" }), "warning");
 }
 
 function completeLoad(token: number, expectedUrl: string): void {
@@ -887,10 +893,10 @@ function completeLoad(token: number, expectedUrl: string): void {
   setLoading(false);
   if (activeDiagnostic?.token === token) {
     markDiagnosticAwaitingVerification(activeDiagnostic);
-    setStatus("Diagnostic frame load event fired. Cross-origin frames cannot be inspected; mark the visual result.", "diagnostic");
+    setStatus(uiLanguage === "ja" ? "診断用フレームがload eventを返しました。表示結果を手動で記録してください。" : "Diagnostic frame load event fired. Cross-origin frames cannot be inspected; mark the visual result.", "diagnostic");
     return;
   }
-  setStatus(`${currentLabel || "Service"} ${loadedAfterTimeout ? "loaded after waiting" : "loaded"}.`, "success");
+  setStatus(uiLanguage === "ja" ? `${currentLabel || "Service"}を読み込みました。` : `${currentLabel || "Service"} ${loadedAfterTimeout ? "loaded after waiting" : "loaded"}.`, "success");
 }
 
 function markDiagnosticAwaitingVerification(diagnostic: ActiveDiagnostic): void {
@@ -911,12 +917,12 @@ function markDiagnosticAwaitingVerification(diagnostic: ActiveDiagnostic): void 
 
 async function reloadCurrentUrl(): Promise<void> {
   if (isDiagnosticBusy()) {
-    setStatus("Finish the active diagnostic before reloading.", "diagnostic");
+    setStatus(uiLanguage === "ja" ? "診断中は再読み込みできません。" : "Finish the active diagnostic before reloading.", "diagnostic");
     return;
   }
 
   if (!currentUrl) {
-    setStatus("No URL is selected.", "warning");
+    setStatus(uiLanguage === "ja" ? "URLが選択されていません。" : "No URL is selected.", "warning");
     return;
   }
   await loadUrl(currentLabel || "AI service", currentUrl, { activePresetId: settings.activePresetId });
@@ -935,7 +941,7 @@ async function openCurrentInFallbackWindow(): Promise<void> {
   }
   const response = await sendMessage({ type: Messages.OPEN_FALLBACK_WINDOW, url: currentUrl });
   setStatus(
-    response.ok ? "Opened right-side fallback window." : response.error || "Could not open fallback window.",
+    response.ok ? tr("side.fallbackOpened") : response.error || tr("side.fallbackOpenFailed"),
     response.ok ? "success" : "error"
   );
 }
@@ -1175,11 +1181,58 @@ async function finishDiagnostic(diagnostic: ActiveDiagnostic, status: Diagnostic
 }
 
 function syncSettingsUi(): void {
-  moreActionsButton.title = "Open settings";
-  moreActionsButton.setAttribute("aria-label", "Open settings");
+  localizeStaticUi();
   syncSidePanelChromeUi();
   renderServiceSwitcher();
+  if (!promptPalette.hidden) {
+    renderPromptList();
+  }
+  if (!contextPopover.hidden && lastContext) {
+    renderContextActions(lastContext);
+  }
   renderDiagnostics();
+}
+
+function resolveUiLanguage(): ResolvedLanguage {
+  return resolveLanguage(settings.language, globalThis.navigator?.language || "");
+}
+
+function tr(key: string, params?: Parameters<typeof t>[2]): string {
+  return t(uiLanguage, key as Parameters<typeof t>[1], params);
+}
+
+function localizeStaticUi(): void {
+  if (document.documentElement) {
+    document.documentElement.lang = uiLanguage;
+  }
+  hideServiceButton.textContent = tr("side.hideFromHeader");
+  contextPopover.setAttribute("aria-label", tr("side.contextActions"));
+  contextSummary.textContent = lastContext ? contextSummary.textContent : tr("side.noSelection");
+  promptPalette.setAttribute("aria-label", tr("side.promptPalette"));
+  promptSearchInput.placeholder = tr("side.promptSearch");
+  promptList.setAttribute("aria-label", tr("side.promptTemplates"));
+  fallbackOpenWindowButton.textContent = tr("side.openSideWindow");
+  fallbackOpenTabButton.textContent = tr("side.openTab");
+  fallbackReloadButton.textContent = tr("side.tryAgain");
+  fallbackTitleSuffix.textContent = uiLanguage === "ja" ? tr("side.fallbackSuffix") : ` ${tr("side.fallbackSuffix")}`;
+  fallbackReason.textContent = fallbackPanel.hidden ? fallbackReason.textContent : defaultFallbackReason();
+  fallbackNote.textContent = tr("side.fallbackNote");
+  setupOptionsButton.textContent = tr("common.openOptions");
+  const setupTitle = typeof setupPanel.querySelector === "function" ? setupPanel.querySelector("h2") : null;
+  const setupCopy = typeof setupPanel.querySelector === "function" ? setupPanel.querySelector("p") : null;
+  if (setupTitle) setupTitle.textContent = tr("side.setupTitle");
+  if (setupCopy) setupCopy.textContent = tr("side.setupCopy");
+  composerToolbar.setAttribute("aria-label", tr("side.composerTools"));
+  composerLauncherButton.title = tr("side.composerTools");
+  composerLauncherButton.setAttribute("aria-label", tr("side.openComposerTools"));
+  contextButton.title = tr("side.addPageContext");
+  const contextLabel = typeof contextButton.querySelector === "function" ? contextButton.querySelector(".composer-button-label") : null;
+  if (contextLabel) contextLabel.textContent = tr("side.context");
+  promptButton.title = tr("side.openPromptPalette");
+  const promptLabel = typeof promptButton.querySelector === "function" ? promptButton.querySelector(".composer-button-label") : null;
+  if (promptLabel) promptLabel.textContent = tr("side.prompt");
+  moreActionsButton.title = tr("common.openSettings");
+  moreActionsButton.setAttribute("aria-label", tr("common.openSettings"));
 }
 
 function syncSidePanelChromeUi(): void {
@@ -1190,18 +1243,18 @@ function syncSidePanelChromeUi(): void {
   app.dataset.footerCollapsed = footerCollapsed ? "true" : "false";
   serviceSwitcher.setAttribute("aria-hidden", headerCollapsed ? "true" : "false");
   serviceMenu.setAttribute("aria-hidden", headerCollapsed ? "true" : "false");
-  headerReloadButton.title = "Reload current service";
-  headerReloadButton.setAttribute("aria-label", "Reload current service");
+  headerReloadButton.title = tr("common.reload");
+  headerReloadButton.setAttribute("aria-label", tr("common.reload"));
   headerReloadButton.setAttribute("aria-hidden", headerCollapsed ? "true" : "false");
   composerActions.setAttribute("aria-hidden", footerCollapsed ? "true" : "false");
   moreActionsButton.setAttribute("aria-hidden", footerCollapsed ? "true" : "false");
 
-  const headerLabel = headerCollapsed ? "Expand header" : "Collapse header";
+  const headerLabel = headerCollapsed ? tr("common.expandHeader") : tr("common.collapseHeader");
   headerChromeToggleButton.title = headerLabel;
   headerChromeToggleButton.setAttribute("aria-label", headerLabel);
   headerChromeToggleButton.setAttribute("aria-expanded", headerCollapsed ? "false" : "true");
 
-  const footerLabel = footerCollapsed ? "Expand footer" : "Collapse footer";
+  const footerLabel = footerCollapsed ? tr("common.expandFooter") : tr("common.collapseFooter");
   footerChromeToggleButton.title = footerLabel;
   footerChromeToggleButton.setAttribute("aria-label", footerLabel);
   footerChromeToggleButton.setAttribute("aria-expanded", footerCollapsed ? "false" : "true");
@@ -1240,9 +1293,9 @@ function renderServiceSwitcher(): void {
     button.className = "service-button";
     button.draggable = true;
     button.dataset.presetId = option.id;
-    button.title = option.url ? `${option.label}: ${option.url}. Drag to reorder. Right-click to hide.` : option.label;
+    button.title = option.url ? `${option.label}: ${option.url}. ${tr("side.dragHideHint")}` : option.label;
     button.setAttribute("role", "tab");
-    button.setAttribute("aria-label", `Open ${option.label}`);
+    button.setAttribute("aria-label", tr("side.openService", { label: option.label }));
     button.setAttribute("aria-selected", isActiveService(option) ? "true" : "false");
 
     if (option.iconSrc) {
@@ -1444,43 +1497,42 @@ function updateElapsedText(): void {
 
 function loadingStatusMessage(label: string, options: LoadOptions): string {
   if (options.diagnostic) {
-    return `Diagnostic: loading ${label} with frame-header relaxation ${modeLabel(options.diagnostic.dnrEnabled)}.`;
+    return tr("side.loadingDiagnostic", { label, mode: modeLabel(options.diagnostic.dnrEnabled) });
   }
 
-  return `Loading ${label}...`;
+  return tr("side.loadingService", { label });
 }
 
 function loadNoticeMessage(label: string, options: LoadOptions): string {
   if (options.diagnostic) {
-    return `Diagnostic is still loading ${label} with frame-header relaxation ${modeLabel(options.diagnostic.dnrEnabled)}.`;
+    return tr("side.loadNoticeDiagnostic", { label });
   }
 
-  return `${label} is still loading. You can keep waiting or open it outside the frame.`;
+  return tr("side.loadNotice", { label });
 }
 
 function timeoutStatusMessage(label: string, options: LoadOptions): string {
   if (options.diagnostic) {
-    return `Diagnostic timed out for ${label} with frame-header relaxation ${modeLabel(options.diagnostic.dnrEnabled)}.`;
+    return tr("side.timeoutDiagnostic", { label });
   }
 
-  return `${label} timed out. Fallback options are available.`;
+  return tr("side.timeout", { label });
 }
 
 function timeoutFallbackReason(options: LoadOptions): string {
-  const timing = `The frame did not finish loading within ${Math.round(LOAD_TIMEOUT_MS / 1000)} seconds.`;
   if (options.diagnostic) {
-    return `${timing} This diagnostic result was saved as a timeout, and anyside will restore the previous service.`;
+    return tr("side.timeoutDiagnosticReason");
   }
 
-  return `${timing} Sign-in, cookies, or embed restrictions may be blocking the frame. Try again, or open it in a side window.`;
+  return tr("side.timeoutReason");
 }
 
 function defaultFallbackReason(): string {
-  return "Sign-in, cookies, or embed restrictions can block the frame. Try again, or open it in a side window when the frame stays blank.";
+  return tr("side.fallbackReason");
 }
 
 function modeLabel(enabled: boolean): string {
-  return enabled ? "applied" : "skipped";
+  return enabled ? tr("side.compatOn") : tr("side.compatOff");
 }
 
 function canonicalUrl(value: string): string {

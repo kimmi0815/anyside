@@ -10,6 +10,7 @@ import {
 } from "../storage/promptTemplateStorage.js";
 import type { PromptTemplate } from "../features/composer/types.js";
 import type { ActivePresetId, CustomUrl, PresetId, Settings } from "../shared/types.js";
+import { resolveLanguage, t, type ResolvedLanguage } from "../shared/i18n.js";
 import { labelFromUrl, normalizeUserUrl } from "../shared/url.js";
 
 const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
@@ -40,16 +41,16 @@ const promptBodyInput = element<HTMLTextAreaElement>("promptBodyInput");
 const promptSubmitButton = element<HTMLButtonElement>("promptSubmitButton");
 const promptTemplateList = element<HTMLElement>("promptTemplateList");
 const resetSettingsButton = element<HTMLButtonElement>("resetSettingsButton");
+const languageSelect = element<HTMLSelectElement>("languageSelect");
 const statusText = element<HTMLElement>("statusText");
 const aboutVersion = element<HTMLElement>("aboutVersion");
-const CUSTOM_URL_ERROR = "Enter HTTPS, or http://localhost / http://127.0.0.1 for local testing. You can omit the protocol.";
-const PROMPT_TEMPLATE_ERROR = "Prompt title and body are required.";
 const STATUS_RESET_MS = 2000;
 const ENTRY_STATUS_SHOW_MS = 1600;
 const FAVICON_FETCH_TIMEOUT_MS = 2500;
 const FAVICON_IMAGE_TIMEOUT_MS = 1500;
 
 let settings: Settings;
+let uiLanguage: ResolvedLanguage = "en";
 let customPromptTemplates: PromptTemplate[] = [];
 let statusTimer: number | undefined;
 const promptTemplateOperations = new Map<string, Promise<void>>();
@@ -59,9 +60,11 @@ void init();
 
 async function init(): Promise<void> {
   settings = await getSettings();
+  uiLanguage = resolveUiLanguage();
   customPromptTemplates = await getCustomPromptTemplates();
   await migrateBareCustomDefault();
   renderVersion();
+  localizeStaticUi();
   render();
   bindEvents();
   observeSections();
@@ -160,6 +163,10 @@ function bindEvents(): void {
     void resetSettings();
   });
 
+  languageSelect.addEventListener("change", () => {
+    void setLanguage(languageSelect.value);
+  });
+
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") {
       return;
@@ -172,6 +179,8 @@ function bindEvents(): void {
 
     if (changes[SETTINGS_KEY]?.newValue) {
       settings = normalizeSettings(changes[SETTINGS_KEY].newValue);
+      uiLanguage = resolveUiLanguage();
+      localizeStaticUi();
       render();
     }
   });
@@ -223,6 +232,7 @@ function observeSections(): void {
 }
 
 function render(): void {
+  languageSelect.value = settings.language;
   renderQuickAccessServices();
   renderCustomUrls();
   renderPromptTemplates();
@@ -235,12 +245,44 @@ function renderVersion(): void {
   }
 }
 
+function resolveUiLanguage(): ResolvedLanguage {
+  return resolveLanguage(settings.language, globalThis.navigator?.language || "");
+}
+
+function localizeStaticUi(): void {
+  if (document.documentElement) {
+    document.documentElement.lang = uiLanguage;
+  }
+  document.title = tr("options.title");
+  if (typeof document.querySelectorAll !== "function") {
+    return;
+  }
+
+  for (const node of Array.from(document.querySelectorAll<HTMLElement>("[data-i18n]"))) {
+    node.textContent = tr(node.dataset.i18n || "options.title");
+  }
+
+  for (const node of Array.from(document.querySelectorAll<HTMLElement>("[data-i18n-attr]"))) {
+    const pairs = (node.dataset.i18nAttr || "").split(",");
+    for (const pair of pairs) {
+      const [attr, key] = pair.split(":").map((part) => part.trim());
+      if (attr && key) {
+        node.setAttribute(attr, tr(key));
+      }
+    }
+  }
+}
+
+function tr(key: string, params?: Parameters<typeof t>[2]): string {
+  return t(uiLanguage, key as Parameters<typeof t>[1], params);
+}
+
 function renderQuickAccessServices(): void {
   hiddenServiceList.textContent = "";
 
   const title = document.createElement("p");
   title.className = "hint";
-  title.textContent = "Quick access";
+  title.textContent = tr("options.quickAccess");
   hiddenServiceList.append(title);
 
   const list = document.createElement("div");
@@ -267,10 +309,10 @@ function renderQuickAccessServices(): void {
     checkbox.type = "checkbox";
     checkbox.checked = visible;
     checkbox.dataset.quickAccessId = service.id;
-    checkbox.setAttribute("aria-label", `${visible ? "Hide" : "Show"} ${service.label} in the side panel header`);
+    checkbox.setAttribute("aria-label", tr(visible ? "options.hideServiceAria" : "options.showServiceAria", { label: service.label }));
     if (visible && visibleCount <= 1) {
       checkbox.disabled = true;
-      checkbox.title = "Keep at least one service in quick access.";
+      checkbox.title = tr("options.keepOneQuickAccess");
     }
     row.append(checkbox);
     list.append(row);
@@ -282,7 +324,7 @@ function renderCustomUrls(): void {
   customUrlList.textContent = "";
 
   if (settings.customUrls.length === 0) {
-    customUrlList.append(emptyState("No custom URLs yet", "Add a trusted AI workspace or local test page above, then switch to it from the side panel header."));
+    customUrlList.append(emptyState(tr("options.noCustomUrlsTitle"), tr("options.noCustomUrlsCopy")));
     return;
   }
 
@@ -295,7 +337,7 @@ function renderPromptTemplates(): void {
   promptTemplateList.textContent = "";
 
   if (customPromptTemplates.length === 0) {
-    promptTemplateList.append(emptyState("No custom prompts yet", "Add the prompts you reach for often, then use them from the Prompt palette."));
+    promptTemplateList.append(emptyState(tr("options.noPromptsTitle"), tr("options.noPromptsCopy")));
     return;
   }
 
@@ -322,9 +364,9 @@ function customUrlEntry(customUrl: CustomUrl): HTMLElement {
   labelInput.type = "text";
   labelInput.name = "label";
   labelInput.value = customUrl.label;
-  labelInput.placeholder = "Workspace name";
+  labelInput.placeholder = tr("options.workspaceName");
   labelInput.spellcheck = false;
-  labelInput.setAttribute("aria-label", "Workspace name");
+  labelInput.setAttribute("aria-label", tr("options.workspaceName"));
 
   const urlInput = document.createElement("input");
   urlInput.className = "entry-input is-secondary";
@@ -335,10 +377,10 @@ function customUrlEntry(customUrl: CustomUrl): HTMLElement {
   urlInput.placeholder = "https://example.com/";
   urlInput.spellcheck = false;
   urlInput.setAttribute("autocomplete", "url");
-  urlInput.setAttribute("aria-label", "Workspace URL");
+  urlInput.setAttribute("aria-label", tr("options.workspaceUrl"));
 
   fields.append(labelInput, urlInput);
-  head.append(fields, entryActions(customUrl.id, "deleteId", "Remove this URL"));
+  head.append(fields, entryActions(customUrl.id, "deleteId", tr("options.removeUrl")));
   entry.append(head);
 
   const foot = document.createElement("div");
@@ -370,19 +412,19 @@ function promptTemplateEntry(template: PromptTemplate): HTMLElement {
   titleInput.type = "text";
   titleInput.name = "title";
   titleInput.value = template.title;
-  titleInput.placeholder = "Prompt title";
-  titleInput.setAttribute("aria-label", "Prompt title");
+  titleInput.placeholder = tr("options.promptTitleInput");
+  titleInput.setAttribute("aria-label", tr("options.promptTitleInput"));
 
   const categoryInput = document.createElement("input");
   categoryInput.className = "entry-input is-secondary";
   categoryInput.type = "text";
   categoryInput.name = "category";
   categoryInput.value = template.category;
-  categoryInput.placeholder = "Category";
-  categoryInput.setAttribute("aria-label", "Prompt category");
+  categoryInput.placeholder = tr("options.promptCategory");
+  categoryInput.setAttribute("aria-label", tr("options.promptCategoryInput"));
 
   fields.append(titleInput, categoryInput);
-  head.append(fields, entryActions(template.id, "deletePromptId", "Remove this prompt"));
+  head.append(fields, entryActions(template.id, "deletePromptId", tr("options.removePrompt")));
   entry.append(head);
 
   const body = document.createElement("textarea");
@@ -390,9 +432,9 @@ function promptTemplateEntry(template: PromptTemplate): HTMLElement {
   body.name = "body";
   body.rows = 4;
   body.value = template.body;
-  body.placeholder = "Prompt body";
+  body.placeholder = tr("options.promptBody");
   body.spellcheck = true;
-  body.setAttribute("aria-label", "Prompt body");
+  body.setAttribute("aria-label", tr("options.promptBody"));
   entry.append(body);
 
   const foot = document.createElement("div");
@@ -481,7 +523,7 @@ async function handleCustomUrlBlur(id: string, input: HTMLInputElement, entry: H
     const next = normalizeUserUrl(input.value);
     if (!next) {
       input.classList.add("is-invalid");
-      showEntryStatus(entry, CUSTOM_URL_ERROR, "error");
+      showEntryStatus(entry, tr("options.customUrlError"), "error");
       input.value = customUrl.url;
       setTimeout(() => input.classList.remove("is-invalid"), 1200);
       return;
@@ -524,7 +566,7 @@ async function handlePromptTemplateBlur(
   if (input.name === "title") {
     if (!value) {
       input.classList.add("is-invalid");
-      showEntryStatus(entry, "Title is required.", "error");
+      showEntryStatus(entry, tr("common.titleRequired"), "error");
       input.value = template.title;
       setTimeout(() => input.classList.remove("is-invalid"), 1200);
       return;
@@ -543,7 +585,7 @@ async function handlePromptTemplateBlur(
         body: template.body,
         favorite: template.favorite
       });
-      showEntryStatus(entry, "Saved", "saved");
+      showEntryStatus(entry, tr("common.saved"), "saved");
     });
     return;
   }
@@ -562,7 +604,7 @@ async function handlePromptTemplateBlur(
         body: template.body,
         favorite: template.favorite
       });
-      showEntryStatus(entry, "Saved", "saved");
+      showEntryStatus(entry, tr("common.saved"), "saved");
       renderPromptTemplates();
     });
     return;
@@ -571,7 +613,7 @@ async function handlePromptTemplateBlur(
   if (input.name === "body") {
     if (!value) {
       input.classList.add("is-invalid");
-      showEntryStatus(entry, "Prompt body is required.", "error");
+      showEntryStatus(entry, tr("options.promptBodyRequired"), "error");
       input.value = template.body;
       setTimeout(() => input.classList.remove("is-invalid"), 1200);
       return;
@@ -590,14 +632,14 @@ async function handlePromptTemplateBlur(
         body: value,
         favorite: template.favorite
       });
-      showEntryStatus(entry, "Saved", "saved");
+      showEntryStatus(entry, tr("common.saved"), "saved");
     });
   }
 }
 
 async function persistEntry(entry: HTMLElement): Promise<void> {
   settings = await saveSettings(settings);
-  showEntryStatus(entry, "Saved", "saved");
+  showEntryStatus(entry, tr("common.saved"), "saved");
 }
 
 function refreshEntryIcon(entry: HTMLElement, customUrl: CustomUrl): void {
@@ -624,7 +666,7 @@ async function refreshIconForCustomUrl(id: string, url: string, entry?: HTMLElem
     const targetEntry = entry?.isConnected ? entry : customUrlList.querySelector<HTMLElement>(`.entry[data-entry-id="${CSS.escape(id)}"]`) ?? undefined;
     if (targetEntry) {
       refreshEntryIcon(targetEntry, customUrl);
-      showEntryStatus(targetEntry, iconUrl ? "Icon updated" : "Saved", "saved");
+      showEntryStatus(targetEntry, iconUrl ? tr("options.iconUpdated") : tr("common.saved"), "saved");
     }
   } catch {
     // Favicon discovery is best-effort and must not block URL saving.
@@ -666,7 +708,7 @@ function showEntryStatus(entry: HTMLElement, message: string, tone: "saved" | "e
 async function addCustomUrl(): Promise<void> {
   const url = normalizeUserUrl(customUrlInput.value);
   if (!url) {
-    setStatus(CUSTOM_URL_ERROR);
+    setStatus(tr("options.customUrlError"));
     return;
   }
 
@@ -682,7 +724,7 @@ async function addCustomUrl(): Promise<void> {
   customLabelInput.value = "";
   customUrlInput.value = "";
   settings = await saveSettings(settings);
-  setStatus("Custom URL added.");
+  setStatus(tr("options.customUrlAdded"));
   render();
   void refreshIconForCustomUrl(id, url);
 }
@@ -702,7 +744,7 @@ async function deleteCustomUrl(id: string): Promise<void> {
   }
 
   settings = await saveSettings(settings);
-  setStatus("Custom URL removed.");
+  setStatus(tr("options.customUrlRemoved"));
   render();
 }
 
@@ -712,18 +754,18 @@ async function addPromptTemplate(): Promise<void> {
   const body = promptBodyInput.value.trim();
 
   if (!title || !body) {
-    setStatus(PROMPT_TEMPLATE_ERROR);
+    setStatus(tr("options.promptTemplateError"));
     return;
   }
 
   promptSubmitButton.disabled = true;
   try {
-    customPromptTemplates = await addCustomPromptTemplate({ title, category, body, favorite: true });
+    customPromptTemplates = await addCustomPromptTemplate({ title, category: category || tr("options.promptCategoryPlaceholder"), body, favorite: true });
     promptTitleInput.value = "";
     promptCategoryInput.value = "";
     promptBodyInput.value = "";
     renderPromptTemplates();
-    setStatus("Prompt added.");
+    setStatus(tr("options.promptAdded"));
   } finally {
     promptSubmitButton.disabled = false;
   }
@@ -734,7 +776,7 @@ async function removePromptTemplate(id: string): Promise<void> {
   await queuePromptTemplateOperation(id, async () => {
     customPromptTemplates = await deleteCustomPromptTemplate(id);
     renderPromptTemplates();
-    setStatus("Prompt removed.");
+    setStatus(tr("options.promptRemoved"));
   });
 }
 
@@ -747,10 +789,23 @@ async function resetSettings(): Promise<void> {
     customLabelInput.value = "";
     customUrlInput.value = "";
     render();
-    setStatus("Settings reset to defaults.");
+    setStatus(tr("options.settingsReset"));
   } finally {
     resetSettingsButton.disabled = false;
   }
+}
+
+async function setLanguage(value: string): Promise<void> {
+  const next = value === "en" || value === "ja" || value === "auto" ? value : "auto";
+  if (settings.language === next) {
+    return;
+  }
+  settings.language = next;
+  settings = await saveSettings(settings);
+  uiLanguage = resolveUiLanguage();
+  localizeStaticUi();
+  render();
+  setStatus(tr("options.languageUpdated"));
 }
 
 async function migrateBareCustomDefault(): Promise<void> {
@@ -790,13 +845,13 @@ async function setQuickAccessVisible(id: ActivePresetId, visible: boolean): Prom
       settings.serviceOrder.push(id);
     }
     settings = await saveSettings(settings);
-    setStatus("Service added to quick access.");
+    setStatus(tr("options.quickAccessAdded"));
     render();
     return;
   }
 
   if (visibleQuickAccessCount() <= 1 && isQuickAccessVisible(id)) {
-    setStatus("Keep at least one service in quick access.");
+    setStatus(tr("options.keepOneQuickAccess"));
     render();
     return;
   }
@@ -805,7 +860,7 @@ async function setQuickAccessVisible(id: ActivePresetId, visible: boolean): Prom
     settings.hiddenServiceIds.push(id);
   }
   settings = await saveSettings(settings);
-  setStatus("Service hidden from quick access.");
+  setStatus(tr("options.quickAccessHidden"));
   render();
 }
 

@@ -111,6 +111,7 @@ test("normalizeSettings keeps valid custom settings and drops invalid entries", 
     headerCollapsed: false,
     footerCollapsed: false
   });
+  assert.equal(settings.language, "auto");
   assert.equal(settings.lastUrlByPreset.chatgpt, "https://chatgpt.com/");
   assert.equal(settings.lastUrlByPreset.keep, undefined);
   assert.equal(settings.lastUrlByPreset.custom, "");
@@ -168,6 +169,7 @@ test("normalizeSettings keeps valid side panel chrome settings and drops invalid
 
 test("frame header relaxation is off by default and old implicit true settings must opt in again", () => {
   const defaults = defaultSettings();
+  assert.equal(defaults.language, "auto");
   assert.equal(defaults.enableFrameHeaderRelaxation, false);
   assert.equal(defaults.frameHeaderRelaxationAcknowledged, false);
   assert.deepEqual(defaults.serviceOrder, BUILT_IN_ORDER);
@@ -192,6 +194,10 @@ test("frame header relaxation is off by default and old implicit true settings m
   assert.equal(optedIn.enableFrameHeaderRelaxation, true);
   assert.equal(optedIn.frameHeaderRelaxationAcknowledged, true);
   assert.equal(optedIn.frameHeaderRelaxationChangeId, "diagnostic-change");
+
+  assert.equal(normalizeSettings({ language: "ja" }).language, "ja");
+  assert.equal(normalizeSettings({ language: "en" }).language, "en");
+  assert.equal(normalizeSettings({ language: "fr" }).language, "auto");
 });
 
 test("getSettings migrates legacy settings into the current storage key", async () => {
@@ -222,6 +228,7 @@ test("getSettings migrates legacy settings into the current storage key", async 
   const settings = await getSettings();
 
   assert.equal(settings.defaultPresetId, "claude");
+  assert.equal(settings.language, "auto");
   assert.equal(settings.activePresetId, "custom:docs");
   assert.equal(settings.customUrls[0].url, "https://docs.example.com/");
   assert.equal(settings.lastUrlByPreset["custom:docs"], "https://docs.example.com/thread");

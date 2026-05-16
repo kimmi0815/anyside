@@ -8,27 +8,27 @@
   </head>
   <body>
     <div class="app">
-      <aside class="sidebar" aria-label="Settings navigation">
+      <aside class="sidebar" aria-label="Settings navigation" data-i18n-attr="aria-label:options.navLabel">
         <a class="brand" href="#top">
           <img class="brand-mark" src="../../assets/brand/anyside-logo.png" alt="" aria-hidden="true">
           <span class="brand-text">
             <span class="brand-name">anyside</span>
-            <span class="brand-tag">Options</span>
+            <span class="brand-tag" data-i18n="options.brandTag">Options</span>
           </span>
         </a>
 
-        <nav class="nav" aria-label="Sections">
+        <nav class="nav" aria-label="Sections" data-i18n-attr="aria-label:options.sections">
           <a href="#services" class="nav-item" data-target="services">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h18" stroke-linecap="round"/></svg>
-            <span>Services</span>
+            <span data-i18n="options.services">Services</span>
           </a>
           <a href="#prompts" class="nav-item" data-target="prompts">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16l-7-4-7 4z" stroke-linejoin="round"/></svg>
-            <span>Prompts</span>
+            <span data-i18n="options.prompts">Prompts</span>
           </a>
           <a href="#about" class="nav-item" data-target="about">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01M11 12h1v5h1" stroke-linecap="round"/></svg>
-            <span>About</span>
+            <span data-i18n="options.about">About</span>
           </a>
         </nav>
 
@@ -37,28 +37,28 @@
 
       <main class="content" id="top">
         <header class="hero">
-          <h1>Settings</h1>
-          <p>Manage quick access services, custom URLs, and your prompt library.</p>
+          <h1 data-i18n="options.settings">Settings</h1>
+          <p data-i18n="options.heroCopy">Manage quick access services, custom URLs, and your prompt library.</p>
         </header>
 
         <section id="services" class="card">
           <div class="card-head">
-            <h2>Services</h2>
-            <p>Choose which services appear in the side panel header. Add trusted custom AI workspaces below.</p>
+            <h2 data-i18n="options.services">Services</h2>
+            <p data-i18n="options.servicesCopy">Choose which services appear in the side panel header. Add trusted custom AI workspaces below.</p>
           </div>
 
           <form id="customUrlForm" class="custom-form" novalidate>
             <label class="field">
-              <span>Name</span>
-              <input id="customLabelInput" type="text" placeholder="Research workspace">
+              <span data-i18n="options.name">Name</span>
+              <input id="customLabelInput" type="text" placeholder="Research workspace" data-i18n-attr="placeholder:options.namePlaceholder">
             </label>
             <label class="field">
-              <span>URL</span>
-              <input id="customUrlInput" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="example.com or https://example.com/">
+              <span data-i18n="options.url">URL</span>
+              <input id="customUrlInput" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="example.com or https://example.com/" data-i18n-attr="placeholder:options.urlPlaceholder">
             </label>
             <button class="button primary" type="submit">
               <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14"><path d="M12 5v14M5 12h14" stroke-linecap="round" stroke-width="2.2"/></svg>
-              Add URL
+              <span data-i18n="options.addUrl">Add URL</span>
             </button>
           </form>
 
@@ -68,51 +68,61 @@
 
         <section id="prompts" class="card">
           <div class="card-head">
-            <h2>Prompt templates</h2>
-            <p>Build a library you can summon from the Prompt palette (⌘K / Ctrl+K).</p>
+            <h2 data-i18n="options.promptsTitle">Prompt templates</h2>
+            <p data-i18n="options.promptsCopy">Build a library you can summon from the Prompt palette (⌘K / Ctrl+K).</p>
           </div>
 
           <form id="promptTemplateForm" class="prompt-form" novalidate>
             <label class="field">
-              <span>Title</span>
-              <input id="promptTitleInput" type="text" autocomplete="off" placeholder="このページを深掘り">
+              <span data-i18n="options.promptTitle">Title</span>
+              <input id="promptTitleInput" type="text" autocomplete="off" placeholder="このページを深掘り" data-i18n-attr="placeholder:options.promptTitlePlaceholder">
             </label>
             <label class="field">
-              <span>Category</span>
-              <input id="promptCategoryInput" type="text" autocomplete="off" placeholder="カスタム">
+              <span data-i18n="options.promptCategory">Category</span>
+              <input id="promptCategoryInput" type="text" autocomplete="off" placeholder="カスタム" data-i18n-attr="placeholder:options.promptCategoryPlaceholder">
             </label>
             <button id="promptSubmitButton" class="button primary" type="submit">
               <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14"><path d="M12 5v14M5 12h14" stroke-linecap="round" stroke-width="2.2"/></svg>
-              Add Prompt
+              <span data-i18n="options.addPrompt">Add Prompt</span>
             </button>
             <label class="field prompt-body-field">
-              <span>Prompt body</span>
-              <textarea id="promptBodyInput" rows="6" spellcheck="true" placeholder="次のページについて...&#10;&#10;タイトル:&#10;{{title}}&#10;&#10;URL:&#10;{{url}}&#10;&#10;内容:&#10;{{selection}}"></textarea>
+              <span data-i18n="options.promptBody">Prompt body</span>
+              <textarea id="promptBodyInput" rows="6" spellcheck="true" placeholder="次のページについて...&#10;&#10;タイトル:&#10;{{title}}&#10;&#10;URL:&#10;{{url}}&#10;&#10;内容:&#10;{{selection}}" data-i18n-attr="placeholder:options.promptBodyPlaceholder"></textarea>
             </label>
           </form>
 
-          <p class="hint">Available variables: <code>{{title}}</code> <code>{{url}}</code> <code>{{selection}}</code> <code>{{date}}</code> <code>{{service}}</code></p>
+          <p class="hint"><span data-i18n="options.variables">Available variables:</span> <code>{{title}}</code> <code>{{url}}</code> <code>{{selection}}</code> <code>{{date}}</code> <code>{{service}}</code></p>
 
           <div id="promptTemplateList" class="card-list"></div>
         </section>
 
         <section id="about" class="card about-card">
           <div class="card-head">
-            <h2>About</h2>
-            <p>anyside keeps your chosen AI services and custom AI workspaces in Chrome's Side Panel.</p>
+            <h2 data-i18n="options.about">About</h2>
+            <p data-i18n="options.aboutCopy">anyside keeps your chosen AI services and custom AI workspaces in Chrome's Side Panel.</p>
           </div>
           <dl class="about-meta">
             <div>
-              <dt>Version</dt>
+              <dt data-i18n="options.version">Version</dt>
               <dd id="aboutVersion">0.1.0</dd>
             </div>
             <div>
-              <dt>Privacy</dt>
-              <dd>No prompts or page content are sent to anyside servers — everything stays in your browser.</dd>
+              <dt data-i18n="options.privacy">Privacy</dt>
+              <dd data-i18n="options.privacyCopy">No prompts or page content are sent to anyside servers — everything stays in your browser.</dd>
+            </div>
+            <div>
+              <dt><label for="languageSelect" data-i18n="options.language">Language</label></dt>
+              <dd>
+                <select id="languageSelect" class="select">
+                  <option value="auto" data-i18n="options.languageAuto">Browser language</option>
+                  <option value="en" data-i18n="options.languageEn">English</option>
+                  <option value="ja" data-i18n="options.languageJa">日本語</option>
+                </select>
+              </dd>
             </div>
           </dl>
           <div class="about-actions">
-            <button id="resetSettingsButton" class="button danger" type="button">Reset to defaults</button>
+            <button id="resetSettingsButton" class="button danger" type="button" data-i18n="options.reset">Reset to defaults</button>
           </div>
         </section>
       </main>

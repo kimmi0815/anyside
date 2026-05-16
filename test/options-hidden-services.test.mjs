@@ -89,7 +89,7 @@ function createOptionsDocument() {
   for (const id of ["promptSubmitButton", "resetSettingsButton"]) {
     document.register(new FakeButtonElement(id, document));
   }
-  for (const id of ["customLabelInput", "customUrlInput", "promptTitleInput", "promptCategoryInput"]) {
+  for (const id of ["customLabelInput", "customUrlInput", "promptTitleInput", "promptCategoryInput", "languageSelect"]) {
     document.register(new FakeInputElement(id, document));
   }
   document.register(new FakeInputElement("promptBodyInput", document));

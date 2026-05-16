@@ -7,6 +7,7 @@ import {
   makeCustomPresetId,
   parseCustomPresetId
 } from "./presets.js";
+import { normalizeLanguageSetting } from "./i18n.js";
 import type { ActivePresetId, CustomUrl, DiagnosticEntry, DiagnosticStatus, Settings, SidePanelChromeSettings } from "./types.js";
 import { normalizeUserUrl } from "./url.js";
 
@@ -24,6 +25,7 @@ function defaultLastUrlByPreset(): Record<string, string> {
 
 export function defaultSettings(): Settings {
   return {
+    language: "auto",
     defaultPresetId: DEFAULT_PRESET_ID,
     activePresetId: DEFAULT_PRESET_ID,
     customUrls: [],
@@ -289,6 +291,7 @@ export function normalizeSettings(value: unknown): Settings {
       : undefined;
 
   return {
+    language: normalizeLanguageSetting(input.language),
     defaultPresetId: visibleActive.defaultPresetId,
     activePresetId: visibleActive.activePresetId,
     customUrls,
