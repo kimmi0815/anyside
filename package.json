@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "A Manifest V3 Chrome extension that keeps AI services in the Chrome Side Panel.",
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",

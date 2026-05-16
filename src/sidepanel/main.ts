@@ -66,7 +66,7 @@ type ActiveDiagnostic = {
   key: string;
   token: number;
   sessionId: number;
-  restoreFrameMode: boolean;
+  dnrSessionId: string;
   returnTarget?: DisplayTarget;
 };
 type FrameModeReloadSuppression = { enabled: boolean; changeId: string };
@@ -260,6 +260,13 @@ function bindEvents(): void {
       }
     });
   }
+
+  window.addEventListener("pagehide", () => {
+    void cancelActiveDiagnostic("Side panel closed before the diagnostic finished.");
+  });
+  window.addEventListener("beforeunload", () => {
+    void cancelActiveDiagnostic("Side panel unloaded before the diagnostic finished.");
+  });
 }
 
 function bindComposerEvents(): void {
@@ -686,6 +693,11 @@ async function loadConfiguredTarget(): Promise<void> {
 }
 
 async function selectService(presetId: string): Promise<void> {
+  if (isDiagnosticBusy()) {
+    setStatus("Finish the active diagnostic before switching services.", "diagnostic");
+    return;
+  }
+
   const target = serviceOptions().find((option) => option.id === presetId);
   if (!target) {
     return;
@@ -885,6 +897,11 @@ function markDiagnosticAwaitingVerification(diagnostic: ActiveDiagnostic): void 
 }
 
 function reloadCurrentUrl(): void {
+  if (isDiagnosticBusy()) {
+    setStatus("Finish the active diagnostic before reloading.", "diagnostic");
+    return;
+  }
+
   if (!currentUrl) {
     setStatus("No URL is selected.", "warning");
     return;
@@ -910,32 +927,6 @@ async function openCurrentInFallbackWindow(): Promise<void> {
   );
 }
 
-async function requestDnrEnabled(enabled: boolean, suppressStorageReload: boolean): Promise<RuntimeResponse> {
-  const changeId = crypto.randomUUID();
-  if (suppressStorageReload) {
-    suppressLocalFrameModeReload(enabled, changeId);
-  }
-
-  const response = await sendMessage({ type: Messages.SET_DNR_ENABLED, enabled, changeId });
-  if (!response.ok) {
-    clearLocalFrameModeReloadSuppression(changeId);
-  } else if (response.settings?.frameHeaderRelaxationChangeId === changeId) {
-    clearLocalFrameModeReloadSuppression(changeId);
-  }
-  return response;
-}
-
-function suppressLocalFrameModeReload(enabled: boolean, changeId: string): void {
-  localFrameModeReloadSuppressions = [
-    ...localFrameModeReloadSuppressions.filter((suppression) => suppression.changeId !== changeId),
-    { enabled, changeId }
-  ];
-}
-
-function clearLocalFrameModeReloadSuppression(changeId: string): void {
-  localFrameModeReloadSuppressions = localFrameModeReloadSuppressions.filter((suppression) => suppression.changeId !== changeId);
-}
-
 function shouldSuppressLocalFrameModeReload(enabled: boolean, changeId: string | undefined): boolean {
   if (!changeId) {
     return false;
@@ -952,19 +943,32 @@ function shouldSuppressLocalFrameModeReload(enabled: boolean, changeId: string |
   return true;
 }
 
-async function restoreFrameModeAfterDiagnostic(enabled: boolean): Promise<void> {
-  if (settings.enableFrameHeaderRelaxation === enabled) {
+async function startDnrDiagnostic(enabled: boolean): Promise<string> {
+  const response = await sendMessage({ type: Messages.START_DNR_DIAGNOSTIC_SESSION, enabled });
+  if (!response.ok || !response.dnrDiagnosticSessionId) {
+    throw new Error(response.error || "Could not start diagnostic compatibility session.");
+  }
+  return response.dnrDiagnosticSessionId;
+}
+
+async function endDnrDiagnostic(sessionId: string): Promise<RuntimeResponse> {
+  return sendMessage({ type: Messages.END_DNR_DIAGNOSTIC_SESSION, sessionId });
+}
+
+async function cancelActiveDiagnostic(message: string): Promise<void> {
+  const diagnostic = activeDiagnostic;
+  if (!diagnostic) {
     return;
   }
 
-  const response = await requestDnrEnabled(enabled, true);
-  if (!response.ok || !response.settings) {
-    setStatus(response.error || "Diagnostic saved, but compatibility mode could not be restored.", "error");
-    return;
+  if (diagnostic.token === loadToken) {
+    completedLoadToken = diagnostic.token;
+    timedOutLoadToken = undefined;
+    clearLoadTimers();
+    setLoading(false);
   }
 
-  settings = response.settings;
-  syncSettingsUi();
+  await finishDiagnostic(diagnostic, "manual-fail", message);
 }
 
 function currentDisplayTarget(): DisplayTarget | undefined {
@@ -1006,18 +1010,11 @@ async function runDiagnostic(presetId: PresetId, dnrEnabled: boolean): Promise<v
 
   try {
     const returnTarget = currentDisplayTarget();
-    const restoreFrameMode = settings.enableFrameHeaderRelaxation;
-    const response = await requestDnrEnabled(dnrEnabled, true);
+    const dnrSessionId = await startDnrDiagnostic(dnrEnabled);
     if (pendingDiagnosticSession !== sessionId) {
+      await endDnrDiagnostic(dnrSessionId);
       return;
     }
-    if (!response.ok || !response.settings) {
-      setStatus(response.error || "Could not update compatibility mode for diagnostics.", "error");
-      return;
-    }
-
-    settings = response.settings;
-    syncSettingsUi();
 
     const key = diagnosticKey(presetId, dnrEnabled);
     settings.diagnostics[key] = {
@@ -1032,7 +1029,9 @@ async function runDiagnostic(presetId: PresetId, dnrEnabled: boolean): Promise<v
     renderDiagnostics();
 
     const token = loadUrl(preset.label, preset.url, { diagnostic: { dnrEnabled } });
-    activeDiagnostic = { key, token, sessionId, restoreFrameMode, returnTarget };
+    activeDiagnostic = { key, token, sessionId, dnrSessionId, returnTarget };
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
     if (pendingDiagnosticSession === sessionId) {
       pendingDiagnosticSession = null;
@@ -1103,22 +1102,28 @@ async function finishDiagnostic(diagnostic: ActiveDiagnostic, status: Diagnostic
 
   try {
     const entry = settings.diagnostics[diagnostic.key];
-    if (!entry) {
-      return;
+    if (entry) {
+      settings.diagnostics[diagnostic.key] = {
+        ...entry,
+        status,
+        finishedAt: Date.now(),
+        message
+      };
+      settings = await saveSettings(settings);
+      renderDiagnostics();
     }
-
-    settings.diagnostics[diagnostic.key] = {
-      ...entry,
-      status,
-      finishedAt: Date.now(),
-      message
-    };
-    settings = await saveSettings(settings);
-    renderDiagnostics();
-    await restoreFrameModeAfterDiagnostic(diagnostic.restoreFrameMode);
+    const restoreResponse = await endDnrDiagnostic(diagnostic.dnrSessionId);
+    if (restoreResponse.ok && restoreResponse.settings) {
+      settings = restoreResponse.settings;
+      syncSettingsUi();
+    } else if (!restoreResponse.ok) {
+      setStatus(restoreResponse.error || "Diagnostic saved, but compatibility mode could not be restored.", "error");
+    }
     restoreDisplayAfterDiagnostic(diagnostic.returnTarget);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
+    await endDnrDiagnostic(diagnostic.dnrSessionId).catch(() => undefined);
+    restoreDisplayAfterDiagnostic(diagnostic.returnTarget);
   } finally {
     if (finalizingDiagnosticSession === diagnostic.sessionId) {
       finalizingDiagnosticSession = null;

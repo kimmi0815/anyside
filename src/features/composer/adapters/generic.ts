@@ -39,11 +39,6 @@ export class GenericContentEditableAdapter implements AIInputAdapter {
 }
 
 export function findVisibleInput(selectors: string[]): EditableElement | null {
-  const activeElement = document.activeElement;
-  if (activeElement && isEditableElement(activeElement) && isVisible(activeElement)) {
-    return activeElement;
-  }
-
   for (const selector of selectors) {
     for (const element of Array.from(document.querySelectorAll(selector))) {
       if (isEditableElement(element) && isVisible(element)) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { GenericContentEditableAdapter } from "../dist/features/composer/adapters/generic.js";
+import { ServiceInputAdapter } from "../dist/features/composer/adapters/serviceAdapters.js";
 
 test("generic adapter inserts into a contenteditable input", async () => {
   const dom = installFakeDom([
@@ -38,6 +39,32 @@ test("generic adapter prioritizes ChatGPT prompt textarea", async () => {
   assert.equal(prompt.textContent, "Hello ChatGPT");
   assert.equal(other.textContent, "");
   assert.equal(dom.activeElement, prompt);
+  restoreFakeDom();
+});
+
+test("service adapter ignores a focused non-composer editable when a composer selector exists", async () => {
+  const search = new FakeElement("search", { contenteditable: "true", role: "searchbox" }, "");
+  const prompt = new FakeElement("prompt-textarea", { contenteditable: "true", "aria-label": "Message ChatGPT" }, "");
+  const dom = installFakeDom([search, prompt]);
+  dom.activeElement = search;
+
+  const result = await new ServiceInputAdapter("chatgpt").insertText("Safe target");
+
+  assert.deepEqual(result, { success: true, reason: "inserted" });
+  assert.equal(prompt.textContent, "Safe target");
+  assert.equal(search.textContent, "");
+  restoreFakeDom();
+});
+
+test("NotebookLM service adapter does not fall back to arbitrary focused editables", async () => {
+  const title = new FakeElement("title", { contenteditable: "true" }, "");
+  const dom = installFakeDom([title]);
+  dom.activeElement = title;
+
+  const result = await new ServiceInputAdapter("notebooklm").insertText("Do not leak");
+
+  assert.deepEqual(result, { success: false, reason: "no-input" });
+  assert.equal(title.textContent, "");
   restoreFakeDom();
 });
 

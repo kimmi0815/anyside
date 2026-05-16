@@ -1,6 +1,5 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import { stripTypeScriptTypes } from "node:module";
 import ts from "typescript";
 
 const root = process.cwd();
@@ -26,6 +25,7 @@ async function collectTypescriptFiles(dir) {
 }
 
 async function stripTypesBuild() {
+  const { stripTypeScriptTypes } = await import("node:module");
   await rm(distDir, { recursive: true, force: true });
 
   const files = await collectTypescriptFiles(srcDir);

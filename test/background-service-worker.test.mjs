@@ -71,12 +71,50 @@ test("background routing can use the saved fallback window tab", async () => {
       service: "chatgpt",
       url: "https://chatgpt.com/c/target",
       fallbackTabId: 10,
-      fallbackUrl: "https://chatgpt.com/"
+      fallbackUrl: "https://chatgpt.com/c/target"
     }
   );
 
   assert.equal(selection.status, "matched");
   assert.equal(selection.agent.url, "https://chatgpt.com/c/target");
+});
+
+test("background routing prefers an exact side-panel frame over a saved fallback window", async () => {
+  const { worker } = await importWorker();
+
+  const selection = worker.__testing.selectAiInputAgent(
+    [
+      agent({ service: "chatgpt", url: "https://chatgpt.com/c/target", connectedAt: 1 }),
+      agent({ service: "chatgpt", url: "https://chatgpt.com/c/target", tabId: 10, connectedAt: 2 })
+    ],
+    {
+      service: "chatgpt",
+      url: "https://chatgpt.com/c/target",
+      fallbackTabId: 10,
+      fallbackUrl: "https://chatgpt.com/c/target"
+    }
+  );
+
+  assert.equal(selection.status, "matched");
+  assert.equal(selection.agent.tabId, undefined);
+});
+
+test("background routing does not use a fallback tab on same origin with a different URL", async () => {
+  const { worker } = await importWorker();
+
+  const selection = worker.__testing.selectAiInputAgent(
+    [
+      agent({ service: "chatgpt", url: "https://chatgpt.com/c/other", tabId: 10, connectedAt: 1 })
+    ],
+    {
+      service: "chatgpt",
+      url: "https://chatgpt.com/c/target",
+      fallbackTabId: 10,
+      fallbackUrl: "https://chatgpt.com/c/other"
+    }
+  );
+
+  assert.equal(selection.status, "ambiguous");
 });
 
 test("ensureOffscreenDocument serializes concurrent document creation", async () => {
@@ -109,6 +147,43 @@ test("ensureOffscreenDocument serializes concurrent document creation", async ()
   assert.equal(createCalls, 1);
 });
 
+test("DNR enable rolls back the ruleset when settings save fails", async () => {
+  const updates = [];
+  const { worker, chrome } = await importWorker({
+    async updateEnabledRulesets(update) {
+      updates.push(update);
+    }
+  });
+
+  chrome.__failStorageSet = true;
+  await assert.rejects(() => worker.__testing.setDnrEnabled(true, "change-test"));
+
+  assert.deepEqual(updates.slice(-2), [
+    { enableRulesetIds: ["allow_framing_ai_sites"], disableRulesetIds: [] },
+    { enableRulesetIds: [], disableRulesetIds: ["allow_framing_ai_sites"] }
+  ]);
+});
+
+test("DNR diagnostic session does not persist settings and restores stored mode", async () => {
+  const updates = [];
+  const { worker, chrome } = await importWorker({
+    async updateEnabledRulesets(update) {
+      updates.push(update);
+    }
+  });
+
+  const before = await chrome.storage.local.get("anyside.settings");
+  const sessionId = await worker.__testing.startDnrDiagnosticSession(true);
+  const during = await chrome.storage.local.get("anyside.settings");
+  await worker.__testing.endDnrDiagnosticSession(sessionId);
+
+  assert.deepEqual(during, before);
+  assert.deepEqual(updates.slice(-2), [
+    { enableRulesetIds: ["allow_framing_ai_sites"], disableRulesetIds: [] },
+    { enableRulesetIds: [], disableRulesetIds: ["allow_framing_ai_sites"] }
+  ]);
+});
+
 async function importWorker(options = {}) {
   const chrome = createChromeMock(options);
   globalThis.chrome = chrome;
@@ -131,7 +206,7 @@ function agent(overrides) {
 
 function createChromeMock(options = {}) {
   const storageData = {};
-  return {
+  const chrome = {
     runtime: {
       onInstalled: createEvent(),
       onMessage: createEvent(),
@@ -154,7 +229,7 @@ function createChromeMock(options = {}) {
       create() {}
     },
     declarativeNetRequest: {
-      async updateEnabledRulesets() {}
+      updateEnabledRulesets: options.updateEnabledRulesets || (async () => {})
     },
     offscreen: {
       createDocument: options.createDocument || (async () => {})
@@ -181,6 +256,9 @@ function createChromeMock(options = {}) {
           return { ...storageData };
         },
         async set(values) {
+          if (chrome.__failStorageSet) {
+            throw new Error("storage set failed");
+          }
           Object.assign(storageData, values);
         },
         async remove(keys) {
@@ -217,6 +295,7 @@ function createChromeMock(options = {}) {
       }
     }
   };
+  return chrome;
 }
 
 function createEvent() {

@@ -35,6 +35,13 @@ test("package-extension does not import the local experimental build helper", as
   assert.doesNotMatch(source, /build\.mjs/);
 });
 
+test("standard build path does not import stripTypeScriptTypes at top level", async () => {
+  const source = await readFile(join(root, "scripts/build.mjs"), "utf8");
+
+  assert.doesNotMatch(source, /import\s*\{\s*stripTypeScriptTypes\s*\}\s*from\s*["']node:module["']/);
+  assert.match(source, /await import\(["']node:module["']\)/);
+});
+
 test("release manifest covers local paths referenced by manifest.json", async () => {
   const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
   const referencedPaths = collectManifestPaths(manifest);

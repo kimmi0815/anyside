@@ -1,12 +1,14 @@
 import type { AIInputAdapter, AIInputInsertResult, AIService } from "../types.js";
-import { findVisibleInput, GenericContentEditableAdapter, insertIntoElement } from "./generic.js";
+import { findVisibleInput, insertIntoElement } from "./generic.js";
 
-type SupportedService = Extract<AIService, "chatgpt" | "claude" | "gemini">;
+type SupportedService = Exclude<AIService, "unknown">;
 
 const SERVICE_HOSTS: Record<SupportedService, string[]> = {
   chatgpt: ["chatgpt.com", "chat.openai.com"],
   claude: ["claude.ai"],
-  gemini: ["gemini.google.com"]
+  gemini: ["gemini.google.com"],
+  perplexity: ["perplexity.ai"],
+  notebooklm: ["notebooklm.google.com"]
 };
 
 const SERVICE_SELECTORS: Record<SupportedService, string[]> = {
@@ -41,12 +43,27 @@ const SERVICE_SELECTORS: Record<SupportedService, string[]> = {
     "[data-lexical-editor='true']",
     "[contenteditable='true']",
     "textarea"
+  ],
+  perplexity: [
+    "textarea[placeholder*='Ask' i]",
+    "textarea[aria-label*='Ask' i]",
+    "textarea[aria-label*='follow-up' i]",
+    "div[contenteditable='true'][role='textbox']",
+    "div[role='textbox'][contenteditable='true']",
+    "[contenteditable='true'][data-lexical-editor='true']",
+    "textarea"
+  ],
+  notebooklm: [
+    "textarea[aria-label*='query' i]",
+    "textarea[aria-label*='notebook' i]",
+    "textarea[placeholder*='Ask' i]",
+    "div[contenteditable='true'][role='textbox']",
+    "div[role='textbox'][contenteditable='true']",
+    "textarea"
   ]
 };
 
 export class ServiceInputAdapter implements AIInputAdapter {
-  private readonly genericAdapter = new GenericContentEditableAdapter();
-
   constructor(readonly service: SupportedService) {}
 
   canHandle(url: string): boolean {
@@ -64,6 +81,6 @@ export class ServiceInputAdapter implements AIInputAdapter {
       return { success: true, reason: "inserted" };
     }
 
-    return this.genericAdapter.insertText(text);
+    return { success: false, reason: input ? "insert-failed" : "no-input" };
   }
 }

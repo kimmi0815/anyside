@@ -1,7 +1,7 @@
 import { Messages } from "../shared/messages.js";
 import { detectAIService } from "../features/composer/lib/aiService.js";
 import { createActiveTabPrompt, createSelectionPrompt } from "../shared/prompt.js";
-import { FALLBACK_WINDOW_KEY, getSettings, saveSettings, updateSettings } from "../shared/storage.js";
+import { FALLBACK_WINDOW_KEY, getSettings, saveSettings } from "../shared/storage.js";
 import type { AIInputInsertReason, AIService, InsertResult, PageContext } from "../features/composer/types.js";
 import type { FallbackWindowState, RuntimeMessage, RuntimeResponse } from "../shared/types.js";
 
@@ -12,6 +12,7 @@ const MENU_OPEN_ID = "open-anyside";
 const LEGACY_FALLBACK_WINDOW_KEY = "aiSidecar.fallbackWindow";
 const AI_INPUT_AGENT_PORT = "ai-input-agent";
 const INSERT_TIMEOUT_MS = 3000;
+const DNR_DIAGNOSTIC_SESSION_TTL_MS = 30000;
 
 type AiAgentRecord = {
   port: chrome.runtime.Port;
@@ -60,16 +61,30 @@ const aiInputAgents = new Set<AiAgentRecord>();
 
 let initializationPromise: Promise<void> | undefined;
 let offscreenDocumentPromise: Promise<void> | undefined;
+let dnrMutationPromise: Promise<void> = Promise.resolve();
+
+type DnrDiagnosticSession = {
+  id: string;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const dnrDiagnosticSessions = new Map<string, DnrDiagnosticSession>();
 
 function ensureInitialized(options: { resetMenus: boolean } = { resetMenus: false }): Promise<void> {
   if (!initializationPromise) {
-    initializationPromise = initializeExtension(options);
+    initializationPromise = initializeExtension(options).catch((error) => {
+      initializationPromise = undefined;
+      throw error;
+    });
   }
   return initializationPromise;
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  initializationPromise = initializeExtension({ resetMenus: true });
+  initializationPromise = initializeExtension({ resetMenus: true }).catch((error) => {
+    initializationPromise = undefined;
+    throw error;
+  });
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -142,9 +157,8 @@ void ensureInitialized();
 
 async function initializeExtension(options: { resetMenus: boolean }): Promise<void> {
   const settings = await getSettings();
-  await saveSettings(settings);
   await configureSidePanel();
-  await syncDnrFromStorage();
+  await syncDnrFromStorage(settings.enableFrameHeaderRelaxation);
   if (options.resetMenus) {
     await createContextMenus();
   }
@@ -173,10 +187,22 @@ async function createContextMenus(): Promise<void> {
 }
 
 async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runtime.MessageSender): Promise<RuntimeResponse> {
+  await ensureInitialized();
+
   switch (message?.type) {
     case Messages.SET_DNR_ENABLED: {
       const settings = await setDnrEnabled(message.enabled, message.changeId);
       return { ok: true, settings };
+    }
+
+    case Messages.START_DNR_DIAGNOSTIC_SESSION: {
+      const sessionId = await startDnrDiagnosticSession(message.enabled);
+      return { ok: true, dnrDiagnosticSessionId: sessionId };
+    }
+
+    case Messages.END_DNR_DIAGNOSTIC_SESSION: {
+      await endDnrDiagnosticSession(message.sessionId);
+      return { ok: true, settings: await getSettings() };
     }
 
     case Messages.COPY_ACTIVE_TAB_PROMPT: {
@@ -352,13 +378,6 @@ function selectAiInputAgent(agents: AiAgentRecord[], target: AiAgentTarget): AiA
     return byFrame;
   }
 
-  if (target.fallbackTabId !== undefined && (!target.fallbackUrl || sameOrigin(target.fallbackUrl, target.url))) {
-    const fallbackAgent = uniqueAgent(matchingAgents.filter((agent) => agent.tabId === target.fallbackTabId));
-    if (fallbackAgent.status !== "unavailable") {
-      return fallbackAgent;
-    }
-  }
-
   const sidePanelCandidates = matchingAgents.filter((agent) => agent.tabId === undefined);
   const exactSidePanelAgent = uniqueAgent(sidePanelCandidates.filter((agent) => matchesExactUrl(agent, target.url)));
   if (exactSidePanelAgent.status !== "unavailable") {
@@ -368,6 +387,15 @@ function selectAiInputAgent(agents: AiAgentRecord[], target: AiAgentTarget): AiA
   const sidePanelAgent = uniqueAgent(sidePanelCandidates);
   if (sidePanelAgent.status !== "unavailable") {
     return sidePanelAgent;
+  }
+
+  if (target.fallbackTabId !== undefined && (!target.fallbackUrl || sameUrl(target.fallbackUrl, target.url))) {
+    const fallbackAgent = uniqueAgent(
+      matchingAgents.filter((agent) => agent.tabId === target.fallbackTabId && matchesExactUrl(agent, target.url))
+    );
+    if (fallbackAgent.status !== "unavailable") {
+      return fallbackAgent;
+    }
   }
 
   return { status: "ambiguous" };
@@ -393,7 +421,7 @@ async function requestAgentInsert(port: chrome.runtime.Port, text: string): Prom
       if (message?.type !== "INSERT_TEXT_RESULT") {
         return;
       }
-      if (message.requestId && message.requestId !== requestId) {
+      if (!message.requestId || message.requestId !== requestId) {
         return;
       }
       finish(message.success === true, message.reason || (message.success ? "inserted" : "insert-failed"));
@@ -463,17 +491,33 @@ function getSenderDocumentId(sender: chrome.runtime.MessageSender | undefined): 
   return (sender as (chrome.runtime.MessageSender & { documentId?: string }) | undefined)?.documentId;
 }
 
-async function syncDnrFromStorage(): Promise<void> {
-  const settings = await getSettings();
-  await applyDnrSetting(settings.enableFrameHeaderRelaxation);
+async function syncDnrFromStorage(enabled?: boolean): Promise<void> {
+  try {
+    const nextEnabled = enabled ?? (await getSettings()).enableFrameHeaderRelaxation;
+    await applyDnrSetting(nextEnabled);
+  } catch (error) {
+    await applyDnrSetting(false).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function setDnrEnabled(enabled: boolean, changeId: string = crypto.randomUUID()) {
-  await applyDnrSetting(enabled);
-  return updateSettings((settings) => {
-    settings.enableFrameHeaderRelaxation = enabled;
-    settings.frameHeaderRelaxationAcknowledged = settings.frameHeaderRelaxationAcknowledged || enabled;
-    settings.frameHeaderRelaxationChangeId = changeId;
+  return withDnrMutation(async () => {
+    const previousSettings = await getSettings();
+    const previousEnabled = previousSettings.enableFrameHeaderRelaxation;
+    await applyDnrSetting(enabled);
+
+    try {
+      return await saveSettings({
+        ...previousSettings,
+        enableFrameHeaderRelaxation: enabled,
+        frameHeaderRelaxationAcknowledged: previousSettings.frameHeaderRelaxationAcknowledged || enabled,
+        frameHeaderRelaxationChangeId: changeId
+      });
+    } catch (error) {
+      await applyDnrSetting(previousEnabled).catch(() => undefined);
+      throw error;
+    }
   });
 }
 
@@ -482,6 +526,45 @@ async function applyDnrSetting(enabled: boolean): Promise<void> {
     ? { enableRulesetIds: [DNR_RULESET_ID], disableRulesetIds: [] }
     : { enableRulesetIds: [], disableRulesetIds: [DNR_RULESET_ID] };
   await chrome.declarativeNetRequest.updateEnabledRulesets(update);
+}
+
+async function startDnrDiagnosticSession(enabled: boolean): Promise<string> {
+  return withDnrMutation(async () => {
+    const id = crypto.randomUUID();
+    await applyDnrSetting(enabled);
+    const timer = setTimeout(() => {
+      void endDnrDiagnosticSession(id);
+    }, DNR_DIAGNOSTIC_SESSION_TTL_MS);
+
+    dnrDiagnosticSessions.set(id, {
+      id,
+      timer
+    });
+    return id;
+  });
+}
+
+async function endDnrDiagnosticSession(sessionId: string): Promise<void> {
+  await withDnrMutation(async () => {
+    const session = dnrDiagnosticSessions.get(sessionId);
+    if (!session) {
+      return;
+    }
+
+    clearTimeout(session.timer);
+    dnrDiagnosticSessions.delete(sessionId);
+    const settings = await getSettings().catch(() => undefined);
+    await applyDnrSetting(settings?.enableFrameHeaderRelaxation === true);
+  });
+}
+
+async function withDnrMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const run = dnrMutationPromise.then(operation, operation);
+  dnrMutationPromise = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
 }
 
 async function openSidePanel(windowId?: number): Promise<void> {
@@ -551,7 +634,10 @@ async function createOffscreenDocumentIfNeeded(): Promise<void> {
 
 export const __testing = {
   ensureOffscreenDocument,
-  selectAiInputAgent
+  selectAiInputAgent,
+  setDnrEnabled,
+  startDnrDiagnosticSession,
+  endDnrDiagnosticSession
 };
 
 async function copyText(text: string, tab?: chrome.tabs.Tab): Promise<void> {
@@ -655,14 +741,15 @@ async function tryReuseFallbackWindow(state: FallbackWindowState, url: string): 
 
   try {
     const existing = await chrome.windows.get(state.windowId, { populate: true });
-    const tabId = state.tabId ?? existing.tabs?.[0]?.id;
+    let tabId = state.tabId ?? existing.tabs?.[0]?.id;
     if (tabId !== undefined) {
       await chrome.tabs.update(tabId, { url, active: true });
     } else {
-      await chrome.tabs.create({ windowId: existing.id, url, active: true });
+      const created = await chrome.tabs.create({ windowId: existing.id, url, active: true });
+      tabId = created.id;
     }
     await chrome.windows.update(existing.id as number, { focused: true });
-    await saveFallbackWindowState({ ...state, url, updatedAt: Date.now() });
+    await saveFallbackWindowState({ ...state, tabId, url, updatedAt: Date.now() });
     return existing.id;
   } catch {
     await saveFallbackWindowState({});

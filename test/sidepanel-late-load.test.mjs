@@ -17,6 +17,7 @@ test("side panel hides fallback when the iframe loads after the normal timeout",
   globalThis.document = document;
   globalThis.window = {
     location: { search: "" },
+    addEventListener() {},
     setTimeout: scheduler.setTimeout,
     clearTimeout: scheduler.clearTimeout,
     setInterval: scheduler.setInterval,
@@ -116,6 +117,7 @@ test("side panel prompt palette includes custom prompt templates from storage", 
   globalThis.document = document;
   globalThis.window = {
     location: { search: "" },
+    addEventListener() {},
     setTimeout: scheduler.setTimeout,
     clearTimeout: scheduler.clearTimeout,
     setInterval: scheduler.setInterval,
@@ -192,6 +194,7 @@ test("side panel service switcher loads registered services and custom URLs", as
   globalThis.document = document;
   globalThis.window = {
     location: { search: "" },
+    addEventListener() {},
     setTimeout: scheduler.setTimeout,
     clearTimeout: scheduler.clearTimeout,
     setInterval: scheduler.setInterval,
@@ -295,6 +298,7 @@ test("side panel composer menus close from toggles and the dismiss layer", async
   globalThis.document = document;
   globalThis.window = {
     location: { search: "" },
+    addEventListener() {},
     setTimeout: scheduler.setTimeout,
     clearTimeout: scheduler.clearTimeout,
     setInterval: scheduler.setInterval,
@@ -380,6 +384,7 @@ test("side panel header and footer chrome collapse and persist", async () => {
   globalThis.document = document;
   globalThis.window = {
     location: { search: "" },
+    addEventListener() {},
     setTimeout: scheduler.setTimeout,
     clearTimeout: scheduler.clearTimeout,
     setInterval: scheduler.setInterval,

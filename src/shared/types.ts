@@ -66,6 +66,8 @@ export type FallbackWindowState = {
 
 export type RuntimeMessage =
   | { type: "SET_DNR_ENABLED"; enabled: boolean; changeId?: string }
+  | { type: "START_DNR_DIAGNOSTIC_SESSION"; enabled: boolean }
+  | { type: "END_DNR_DIAGNOSTIC_SESSION"; sessionId: string }
   | { type: "COPY_ACTIVE_TAB_PROMPT" }
   | { type: "COPY_TEXT"; text: string }
   | { type: "GET_PAGE_CONTEXT" }
@@ -78,6 +80,7 @@ export type RuntimeResponse = {
   ok: boolean;
   error?: string;
   settings?: Settings;
+  dnrDiagnosticSessionId?: string;
   windowId?: number;
   text?: string;
   pageContext?: PageContext;

@@ -39,6 +39,7 @@ test("options restores services hidden from the side panel header", async () => 
     await import(`../dist/options/main.js?hidden-services-${Date.now()}`);
     await flushAsync();
 
+    assert.match(textTree(document.getElementById("compatibilityDomainList")), /www\.perplexity\.ai/);
     assert.match(textTree(document.getElementById("hiddenServiceList")), /Show Claude/);
 
     const restoreButton = findByDataset(document.getElementById("hiddenServiceList"), "restoreServiceId", "claude");
@@ -64,6 +65,7 @@ function createOptionsDocument() {
     "hiddenServiceList",
     "customUrlList",
     "promptTemplateList",
+    "compatibilityDomainList",
     "statusText",
     "aboutVersion"
   ]) {

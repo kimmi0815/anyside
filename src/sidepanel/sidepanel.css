@@ -43,26 +43,6 @@ body {
   background: var(--bg);
 }
 
-.skip-link {
-  position: fixed;
-  top: 8px;
-  left: 8px;
-  z-index: 20;
-  transform: translateY(-140%);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 7px 10px;
-  background: var(--surface-solid);
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.skip-link:focus-visible {
-  transform: translateY(0);
-}
-
 .app {
   display: grid;
   position: relative;

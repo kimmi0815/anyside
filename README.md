@@ -15,7 +15,7 @@ It displays a local extension page in the Side Panel and loads the selected AI s
 
 ## Build
 
-Install dependencies, typecheck, and build the extension JavaScript into `dist/`:
+Use Node.js 20.19 or newer. Install dependencies, typecheck, and build the extension JavaScript into `dist/`:
 
 ```sh
 npm install
@@ -51,7 +51,7 @@ npm run release:zip
 
 ## Side Panel UI
 
-The Side Panel keeps the AI frame visually primary. Its top bar shows a compact address pill with the selected service host and path, while full URLs remain available through the field title and accessibility label. Successful loads do not leave a visible status message; loading, timeout, and error states use a small transient banner or fallback actions.
+The Side Panel keeps the AI frame visually primary. The header switches services, and loading, timeout, and error states use a small transient banner or fallback actions.
 
 Custom URLs are managed in Options. HTTPS URLs can be entered with or without `https://`; local testing URLs may use `http://localhost`, `http://127.0.0.1`, or the same localhost inputs without a protocol.
 
@@ -61,7 +61,7 @@ Developer diagnostics are hidden from the normal Side Panel UI. Open the side pa
 
 Chrome extensions cannot inspect the inside of cross-origin iframes, so diagnostics record load/timeout signals and let you manually mark whether the service was visibly usable.
 
-Each diagnostic temporarily changes iframe compatibility mode for the tested service, restores the previous setting afterward, and returns the visible Side Panel service to what was shown before the diagnostic run.
+Each diagnostic temporarily changes the active DNR ruleset for the tested service without saving that temporary mode as a user setting. The background worker restores the stored setting afterward or when the diagnostic session expires, and the Side Panel returns to what was shown before the diagnostic run.
 
 ## Iframe compatibility mode
 
@@ -97,6 +97,7 @@ If an iframe does not load or login is unreliable, use Open in side window. anys
 - When an AI input page is connected, anyside may insert that user-requested text into the visible AI input field; otherwise it falls back to copying the text.
 - It does not auto-submit prompts.
 - The context menu only creates a prompt and copies it to your clipboard after a user action.
+- The embedded iframe does not receive delegated `clipboard-read` or `clipboard-write` permissions from anyside. Extension-initiated clipboard writes use the extension/offscreen helper instead.
 
 ## Files
 

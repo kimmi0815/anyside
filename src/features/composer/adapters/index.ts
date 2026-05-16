@@ -4,7 +4,7 @@ import { GenericContentEditableAdapter } from "./generic.js";
 import { ServiceInputAdapter } from "./serviceAdapters.js";
 
 export function createAIInputAdapter(service: AIService): AIInputAdapter {
-  if (service === "chatgpt" || service === "claude" || service === "gemini") {
+  if (service !== "unknown") {
     return new ServiceInputAdapter(service);
   }
 

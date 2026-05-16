@@ -1,5 +1,5 @@
 import { Messages } from "../shared/messages.js";
-import { BUILT_IN_PRESETS, CUSTOM_PRESET_ID, DEFAULT_PRESET_ID, makeCustomPresetId } from "../shared/presets.js";
+import { BUILT_IN_PRESETS, CUSTOM_PRESET_ID, DEFAULT_PRESET_ID, FRAME_COMPATIBILITY_DOMAINS, makeCustomPresetId } from "../shared/presets.js";
 import { defaultSettings, getSettings, normalizeSettings, saveSettings, SETTINGS_KEY } from "../shared/storage.js";
 import {
   CUSTOM_PROMPT_TEMPLATES_KEY,
@@ -25,6 +25,7 @@ const promptBodyInput = element<HTMLTextAreaElement>("promptBodyInput");
 const promptSubmitButton = element<HTMLButtonElement>("promptSubmitButton");
 const promptTemplateList = element<HTMLElement>("promptTemplateList");
 const dnrToggle = element<HTMLInputElement>("dnrToggle");
+const compatibilityDomainList = element<HTMLElement>("compatibilityDomainList");
 const resetSettingsButton = element<HTMLButtonElement>("resetSettingsButton");
 const statusText = element<HTMLElement>("statusText");
 const aboutVersion = element<HTMLElement>("aboutVersion");
@@ -32,10 +33,14 @@ const CUSTOM_URL_ERROR = "Enter HTTPS, or http://localhost / http://127.0.0.1 fo
 const PROMPT_TEMPLATE_ERROR = "Prompt title and body are required.";
 const STATUS_RESET_MS = 2000;
 const ENTRY_STATUS_SHOW_MS = 1600;
+const FAVICON_FETCH_TIMEOUT_MS = 2500;
+const FAVICON_IMAGE_TIMEOUT_MS = 1500;
 
 let settings: Settings;
 let customPromptTemplates: PromptTemplate[] = [];
 let statusTimer: number | undefined;
+const promptTemplateOperations = new Map<string, Promise<void>>();
+const deletedPromptTemplateIds = new Set<string>();
 
 void init();
 
@@ -212,7 +217,17 @@ function render(): void {
   renderHiddenServices();
   renderCustomUrls();
   renderPromptTemplates();
+  renderCompatibilityDomains();
   dnrToggle.checked = settings.enableFrameHeaderRelaxation;
+}
+
+function renderCompatibilityDomains(): void {
+  compatibilityDomainList.textContent = "";
+  for (const domain of FRAME_COMPATIBILITY_DOMAINS) {
+    const item = document.createElement("li");
+    item.textContent = domain;
+    compatibilityDomainList.append(item);
+  }
 }
 
 function renderVersion(): void {
@@ -464,11 +479,8 @@ async function handleCustomUrlBlur(id: string, input: HTMLInputElement, entry: H
     customUrl.url = next;
     input.value = next;
     settings.lastUrlByPreset[makeCustomPresetId(id)] = next;
-    const iconUrl = await findIconForUrl(next);
-    customUrl.iconUrl = iconUrl;
-    customUrl.iconUpdatedAt = iconUrl ? Date.now() : undefined;
     await persistEntry(entry);
-    refreshEntryIcon(entry, customUrl);
+    void refreshIconForCustomUrl(id, next, entry);
     return;
   }
 
@@ -507,13 +519,18 @@ async function handlePromptTemplateBlur(
     if (value === template.title) {
       return;
     }
-    customPromptTemplates = await updateCustomPromptTemplate(id, {
-      title: value,
-      category: template.category,
-      body: template.body,
-      favorite: template.favorite
+    await queuePromptTemplateOperation(id, async () => {
+      if (deletedPromptTemplateIds.has(id)) {
+        return;
+      }
+      customPromptTemplates = await updateCustomPromptTemplate(id, {
+        title: value,
+        category: template.category,
+        body: template.body,
+        favorite: template.favorite
+      });
+      showEntryStatus(entry, "Saved", "saved");
     });
-    showEntryStatus(entry, "Saved", "saved");
     return;
   }
 
@@ -521,14 +538,19 @@ async function handlePromptTemplateBlur(
     if (value === template.category) {
       return;
     }
-    customPromptTemplates = await updateCustomPromptTemplate(id, {
-      title: template.title,
-      category: value,
-      body: template.body,
-      favorite: template.favorite
+    await queuePromptTemplateOperation(id, async () => {
+      if (deletedPromptTemplateIds.has(id)) {
+        return;
+      }
+      customPromptTemplates = await updateCustomPromptTemplate(id, {
+        title: template.title,
+        category: value,
+        body: template.body,
+        favorite: template.favorite
+      });
+      showEntryStatus(entry, "Saved", "saved");
+      renderPromptTemplates();
     });
-    showEntryStatus(entry, "Saved", "saved");
-    renderPromptTemplates();
     return;
   }
 
@@ -544,13 +566,18 @@ async function handlePromptTemplateBlur(
     if (value === template.body) {
       return;
     }
-    customPromptTemplates = await updateCustomPromptTemplate(id, {
-      title: template.title,
-      category: template.category,
-      body: value,
-      favorite: template.favorite
+    await queuePromptTemplateOperation(id, async () => {
+      if (deletedPromptTemplateIds.has(id)) {
+        return;
+      }
+      customPromptTemplates = await updateCustomPromptTemplate(id, {
+        title: template.title,
+        category: template.category,
+        body: value,
+        favorite: template.favorite
+      });
+      showEntryStatus(entry, "Saved", "saved");
     });
-    showEntryStatus(entry, "Saved", "saved");
   }
 }
 
@@ -566,6 +593,45 @@ function refreshEntryIcon(entry: HTMLElement, customUrl: CustomUrl): void {
   }
   const replacement = createEntryIcon(customUrl.iconUrl, serviceInitial(customUrl.label));
   existing.replaceWith(replacement);
+}
+
+async function refreshIconForCustomUrl(id: string, url: string, entry?: HTMLElement): Promise<void> {
+  try {
+    const iconUrl = await findIconForUrl(url);
+    const latest = await getSettings();
+    const customUrl = latest.customUrls.find((item) => item.id === id && item.url === url);
+    if (!customUrl) {
+      return;
+    }
+
+    customUrl.iconUrl = iconUrl;
+    customUrl.iconUpdatedAt = iconUrl ? Date.now() : undefined;
+    settings = await saveSettings(latest);
+    const targetEntry = entry?.isConnected ? entry : customUrlList.querySelector<HTMLElement>(`.entry[data-entry-id="${CSS.escape(id)}"]`) ?? undefined;
+    if (targetEntry) {
+      refreshEntryIcon(targetEntry, customUrl);
+      showEntryStatus(targetEntry, iconUrl ? "Icon updated" : "Saved", "saved");
+    }
+  } catch {
+    // Favicon discovery is best-effort and must not block URL saving.
+  }
+}
+
+async function queuePromptTemplateOperation(id: string, operation: () => Promise<void>): Promise<void> {
+  const previous = promptTemplateOperations.get(id) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(operation)
+    .catch((error) => {
+      setStatus(error instanceof Error ? error.message : String(error));
+    })
+    .finally(() => {
+      if (promptTemplateOperations.get(id) === next) {
+        promptTemplateOperations.delete(id);
+      }
+    });
+  promptTemplateOperations.set(id, next);
+  await next;
 }
 
 function showEntryStatus(entry: HTMLElement, message: string, tone: "saved" | "error"): void {
@@ -591,21 +657,20 @@ async function addCustomUrl(): Promise<void> {
   }
 
   const label = customLabelInput.value.trim() || labelFromUrl(url);
-  const iconUrl = await findIconForUrl(url);
+  const id = crypto.randomUUID();
   settings.customUrls.push({
-    id: crypto.randomUUID(),
+    id,
     label,
     url,
-    iconUrl,
-    iconUpdatedAt: iconUrl ? Date.now() : undefined,
     createdAt: Date.now()
   });
 
   customLabelInput.value = "";
   customUrlInput.value = "";
   settings = await saveSettings(settings);
-  setStatus(iconUrl ? "Custom URL added with site icon." : "Custom URL added.");
+  setStatus("Custom URL added.");
   render();
+  void refreshIconForCustomUrl(id, url);
 }
 
 async function deleteCustomUrl(id: string): Promise<void> {
@@ -651,9 +716,12 @@ async function addPromptTemplate(): Promise<void> {
 }
 
 async function removePromptTemplate(id: string): Promise<void> {
-  customPromptTemplates = await deleteCustomPromptTemplate(id);
-  renderPromptTemplates();
-  setStatus("Prompt removed.");
+  deletedPromptTemplateIds.add(id);
+  await queuePromptTemplateOperation(id, async () => {
+    customPromptTemplates = await deleteCustomPromptTemplate(id);
+    renderPromptTemplates();
+    setStatus("Prompt removed.");
+  });
 }
 
 async function resetSettings(): Promise<void> {
@@ -716,19 +784,17 @@ async function migrateBareCustomDefault(): Promise<void> {
 
   const id = crypto.randomUUID();
   const presetId = makeCustomPresetId(id);
-  const iconUrl = await findIconForUrl(url);
   settings.customUrls.push({
     id,
     label: labelFromUrl(url),
     url,
-    iconUrl,
-    iconUpdatedAt: iconUrl ? Date.now() : undefined,
     createdAt: Date.now()
   });
   settings.defaultPresetId = presetId;
   settings.activePresetId = presetId;
   settings.lastUrlByPreset[presetId] = url;
   settings = await saveSettings(settings);
+  void refreshIconForCustomUrl(id, url);
 }
 
 async function restoreHiddenService(id: ActivePresetId): Promise<void> {
@@ -776,7 +842,7 @@ async function iconCandidatesForUrl(url: string): Promise<string[]> {
   };
 
   try {
-    const response = await fetch(url, { credentials: "omit" });
+    const response = await fetchWithTimeout(url, { credentials: "omit" }, FAVICON_FETCH_TIMEOUT_MS);
     if (response.ok && response.headers.get("content-type")?.includes("text/html")) {
       const html = await response.text();
       const doc = new DOMParser().parseFromString(html, "text/html");
@@ -809,7 +875,7 @@ async function addCandidateFromManifest(
   }
 
   try {
-    const response = await fetch(normalizedManifestUrl, { credentials: "omit" });
+    const response = await fetchWithTimeout(normalizedManifestUrl, { credentials: "omit" }, FAVICON_FETCH_TIMEOUT_MS);
     if (!response.ok) {
       return;
     }
@@ -851,10 +917,31 @@ function normalizeIconCandidate(value: string | null | undefined, baseUrl: strin
 function canLoadImage(url: string): Promise<boolean> {
   return new Promise((resolve) => {
     const image = new Image();
-    image.onload = () => resolve(true);
-    image.onerror = () => resolve(false);
+    const timer = setTimeout(() => {
+      image.onload = null;
+      image.onerror = null;
+      resolve(false);
+    }, FAVICON_IMAGE_TIMEOUT_MS);
+    image.onload = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    image.onerror = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
     image.src = url;
   });
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function sendMessage(message: RuntimeMessage): Promise<RuntimeResponse> {
