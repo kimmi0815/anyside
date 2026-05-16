@@ -11,11 +11,19 @@ const LOAD_TIMEOUT_MS = 8000;
 const TOAST_MS = 2200;
 const RECENT_PROMPTS_KEY = "composer.recentPromptTemplateIds";
 const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
-  chatgpt: "../../assets/service-icons/chatgpt.svg",
-  claude: "../../assets/service-icons/claude.png",
+  chatgpt: "../../assets/service-icons/chatgpt.png",
   gemini: "../../assets/service-icons/gemini.png",
+  claude: "../../assets/service-icons/claude.png",
   perplexity: "../../assets/service-icons/perplexity.svg",
-  notebooklm: "../../assets/service-icons/notebooklm.svg"
+  notebooklm: "../../assets/service-icons/notebooklm.svg",
+  grok: "../../assets/service-icons/grok.png",
+  copilot: "../../assets/service-icons/copilot.svg",
+  deepseek: "../../assets/service-icons/deepseek.ico",
+  kimi: "../../assets/service-icons/kimi.ico",
+  minimax: "../../assets/service-icons/minimax.ico",
+  glm: "../../assets/service-icons/glm.svg",
+  manus: "../../assets/service-icons/manus.png",
+  genspark: "../../assets/service-icons/genspark.png"
 };
 
 const app = element<HTMLElement>("app");

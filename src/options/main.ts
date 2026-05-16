@@ -9,8 +9,24 @@ import {
   updateCustomPromptTemplate
 } from "../storage/promptTemplateStorage.js";
 import type { PromptTemplate } from "../features/composer/types.js";
-import type { ActivePresetId, CustomUrl, Settings } from "../shared/types.js";
+import type { ActivePresetId, CustomUrl, PresetId, Settings } from "../shared/types.js";
 import { labelFromUrl, normalizeUserUrl } from "../shared/url.js";
+
+const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
+  chatgpt: "../../assets/service-icons/chatgpt.png",
+  gemini: "../../assets/service-icons/gemini.png",
+  claude: "../../assets/service-icons/claude.png",
+  perplexity: "../../assets/service-icons/perplexity.svg",
+  notebooklm: "../../assets/service-icons/notebooklm.svg",
+  grok: "../../assets/service-icons/grok.png",
+  copilot: "../../assets/service-icons/copilot.svg",
+  deepseek: "../../assets/service-icons/deepseek.ico",
+  kimi: "../../assets/service-icons/kimi.ico",
+  minimax: "../../assets/service-icons/minimax.ico",
+  glm: "../../assets/service-icons/glm.svg",
+  manus: "../../assets/service-icons/manus.png",
+  genspark: "../../assets/service-icons/genspark.png"
+};
 
 const hiddenServiceList = element<HTMLElement>("hiddenServiceList");
 const customUrlForm = element<HTMLFormElement>("customUrlForm");
@@ -812,7 +828,7 @@ function quickAccessOptions(): { id: ActivePresetId; label: string; url: string;
     id: preset.id,
     label: preset.label,
     url: settings.lastUrlByPreset[preset.id] || preset.url,
-    iconUrl: undefined
+    iconUrl: SERVICE_ICON_SRC[preset.id]
   }));
   const byId = new Map<ActivePresetId, { id: ActivePresetId; label: string; url: string; iconUrl?: string }>(
     [...builtIns, ...custom].map((service) => [service.id, service])
