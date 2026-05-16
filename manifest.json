@@ -29,7 +29,6 @@
     "scripting",
     "sidePanel",
     "storage",
-    "tabs",
     "windows"
   ],
   "host_permissions": [

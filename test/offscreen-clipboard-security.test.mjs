@@ -33,6 +33,16 @@ test("OFFSCREEN_COPY_TEXT rejects non-string text", async () => {
   assert.deepEqual(written, []);
 });
 
+test("OFFSCREEN_COPY_TEXT rejects oversized text", async () => {
+  const { listener, written } = await loadOffscreen();
+  const response = await invoke(listener, {
+    message: { type: "OFFSCREEN_COPY_TEXT", target: "offscreen", text: "x".repeat(1_000_001) },
+    sender: { id: "anyside" }
+  });
+  assert.deepEqual(response, { ok: false, error: "Text is too large." });
+  assert.deepEqual(written, []);
+});
+
 test("OFFSCREEN_COPY_TEXT accepts background-origin string text", async () => {
   const { listener, written } = await loadOffscreen();
   const response = await invoke(listener, {

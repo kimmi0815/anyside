@@ -57,30 +57,31 @@ Custom URLs are managed in Options. HTTPS URLs can be entered with or without `h
 
 ## Developer diagnostics
 
-Developer diagnostics are hidden from the normal Side Panel UI. Open the side panel page with `?debug=1` to test each bundled AI service with iframe compatibility mode off and on.
+Developer diagnostics are hidden from the normal Side Panel UI. Open the side panel page with `?debug=1` to test each bundled AI service with frame-header relaxation skipped and applied.
 
 Chrome extensions cannot inspect the inside of cross-origin iframes, so diagnostics record load/timeout signals and let you manually mark whether the service was visibly usable.
 
-Each diagnostic temporarily changes the active DNR ruleset for the tested service without saving that temporary mode as a user setting. The background worker restores the stored setting afterward or when the diagnostic session expires, and the Side Panel returns to what was shown before the diagnostic run.
+Each diagnostic temporarily opens a frame compatibility session for the tested service without saving a user setting. The background worker removes the session rule afterward, when the session expires, or when the Side Panel unloads, and the Side Panel returns to what was shown before the diagnostic run.
 
-## Iframe compatibility mode
+## Iframe compatibility
 
-Some AI sites block iframe embedding with `X-Frame-Options` or `Content-Security-Policy`. anyside includes a Declarative Net Request ruleset at `rules/allow-framing-ai-sites.json` that removes:
+Some AI sites block iframe embedding with `X-Frame-Options` or `Content-Security-Policy`. anyside uses Declarative Net Request frame compatibility rules that remove:
 
 - `x-frame-options`
 - `content-security-policy`
 
-The allowlisted request domains are `chatgpt.com`, `claude.ai`, `gemini.google.com`, `www.perplexity.ai`, and `notebooklm.google.com`.
+The allowlisted request domains are `chatgpt.com`, `claude.ai`, `gemini.google.com`, `www.perplexity.ai`, and `notebooklm.google.com`. The packaged static ruleset at `rules/allow-framing-ai-sites.json` remains disabled; runtime compatibility uses short-lived session rules automatically while a built-in AI iframe is being loaded from the extension Side Panel.
 
-This compatibility mode is intentionally limited:
+This compatibility behavior is intentionally limited:
 
 - It only applies to the allowlisted built-in AI domains.
 - It only applies to `sub_frame` requests.
 - It does not apply to all URLs.
 - It does not apply to `main_frame` browsing.
 - It is not applied to arbitrary Custom URL domains.
+- It is removed on service switch, reload, Side Panel unload, diagnostic completion, or session timeout.
 
-Because DNR rules operate at the browser request level and are not limited to the anyside Side Panel iframe, compatibility mode is off by default. While enabled, Chrome can apply this ruleset to any matching subframe request in the browser. Enabling it is an explicit opt-in from Options or developer diagnostics. Existing stored settings from older builds must opt in again before the ruleset can be enabled.
+There is no user-facing compatibility toggle. If Chrome rejects the scoped session rule, anyside fails closed instead of enabling the broad static ruleset.
 
 ## Login guidance
 
@@ -91,6 +92,8 @@ AI services may still fail inside an iframe because of login, third-party cookie
 If an iframe does not load or login is unreliable, use Open in side window. anyside creates or reuses a normal Chrome window on the right side and loads the selected AI service there. This usually behaves more like a normal browser session than an embedded iframe.
 
 ## Privacy and safety
+
+For the public privacy summary, see [`PRIVACY.md`](PRIVACY.md). For release permission and Chrome Web Store disclosure checks, see [`docs/chrome-web-store-checklist.md`](docs/chrome-web-store-checklist.md).
 
 - anyside does not send browsing content to any external server of its own.
 - Context and Prompt actions run only after a user action, then use the active tab title, URL, and selected text to build the requested text.

@@ -147,41 +147,104 @@ test("ensureOffscreenDocument serializes concurrent document creation", async ()
   assert.equal(createCalls, 1);
 });
 
-test("DNR enable rolls back the ruleset when settings save fails", async () => {
-  const updates = [];
-  const { worker, chrome } = await importWorker({
-    async updateEnabledRulesets(update) {
-      updates.push(update);
+test("frame compatibility session creates and removes a scoped session rule", async () => {
+  const sessionUpdates = [];
+  const { worker } = await importWorker({
+    async updateSessionRules(update) {
+      sessionUpdates.push(update);
     }
   });
+  sessionUpdates.length = 0;
 
-  chrome.__failStorageSet = true;
-  await assert.rejects(() => worker.__testing.setDnrEnabled(true, "change-test"));
+  const sessionId = await worker.__testing.startFrameCompatibilitySession("chatgpt", "https://chatgpt.com/", true);
+  await worker.__testing.endFrameCompatibilitySession(sessionId);
 
-  assert.deepEqual(updates.slice(-2), [
-    { enableRulesetIds: ["allow_framing_ai_sites"], disableRulesetIds: [] },
-    { enableRulesetIds: [], disableRulesetIds: ["allow_framing_ai_sites"] }
-  ]);
+  assert.equal(sessionUpdates.length, 2);
+  assert.deepEqual(sessionUpdates[0].removeRuleIds, [1001]);
+  assert.equal(sessionUpdates[0].addRules.length, 1);
+  assert.deepEqual(sessionUpdates[0].addRules[0].condition.requestDomains.sort(), [
+    "chatgpt.com",
+    "claude.ai",
+    "gemini.google.com",
+    "notebooklm.google.com",
+    "www.perplexity.ai"
+  ].sort());
+  assert.deepEqual(sessionUpdates[1], { removeRuleIds: [1001], addRules: [] });
 });
 
-test("DNR diagnostic session does not persist settings and restores stored mode", async () => {
-  const updates = [];
-  const { worker, chrome } = await importWorker({
+test("startup recovery disables static ruleset and clears session rules", async () => {
+  const rulesetUpdates = [];
+  const sessionUpdates = [];
+  await importWorker({
     async updateEnabledRulesets(update) {
-      updates.push(update);
+      rulesetUpdates.push(update);
+    },
+    async updateSessionRules(update) {
+      sessionUpdates.push(update);
     }
   });
 
+  assert.deepEqual(rulesetUpdates.at(-1), {
+    enableRulesetIds: [],
+    disableRulesetIds: ["allow_framing_ai_sites"]
+  });
+  assert.deepEqual(sessionUpdates.at(-1), { removeRuleIds: [1001], addRules: [] });
+});
+
+test("disabled and non-built-in frame compatibility sessions are no-ops", async () => {
+  const sessionUpdates = [];
+  const { worker } = await importWorker({
+    async updateSessionRules(update) {
+      sessionUpdates.push(update);
+    }
+  });
+  sessionUpdates.length = 0;
+
+  const disabledSessionId = await worker.__testing.startFrameCompatibilitySession("chatgpt", "https://chatgpt.com/", false);
+  const customSessionId = await worker.__testing.startFrameCompatibilitySession("custom:research", "https://research.example.com/", true);
+  await worker.__testing.endFrameCompatibilitySession(disabledSessionId);
+  await worker.__testing.endFrameCompatibilitySession(customSessionId);
+
+  assert.deepEqual(sessionUpdates, []);
+});
+
+test("frame compatibility rule is side-panel sub-frame scoped", async () => {
+  const { worker } = await importWorker();
+  const rule = worker.__testing.createFrameCompatibilitySessionRule();
+
+  assert.deepEqual(rule.condition.resourceTypes, ["sub_frame"]);
+  assert.equal(rule.condition.resourceTypes.includes("main_frame"), false);
+  assert.deepEqual(rule.condition.tabIds, [-1]);
+  assert.deepEqual(rule.condition.initiatorDomains, ["anyside"]);
+  assert.equal(rule.condition.requestDomains.includes("research.example.com"), false);
+});
+
+test("session rule failure fails closed without enabling the static ruleset", async () => {
+  const rulesetUpdates = [];
+  let rejectSessionRules = false;
+  const { worker, chrome } = await importWorker({
+    async updateEnabledRulesets(update) {
+      rulesetUpdates.push(update);
+    },
+    async updateSessionRules() {
+      if (rejectSessionRules) {
+        throw new Error("session rules rejected");
+      }
+    }
+  });
+  rulesetUpdates.length = 0;
+  rejectSessionRules = true;
+
   const before = await chrome.storage.local.get("anyside.settings");
-  const sessionId = await worker.__testing.startDnrDiagnosticSession(true);
+  await assert.rejects(
+    () => worker.__testing.startFrameCompatibilitySession("chatgpt", "https://chatgpt.com/", true),
+    /session rules rejected/
+  );
   const during = await chrome.storage.local.get("anyside.settings");
-  await worker.__testing.endDnrDiagnosticSession(sessionId);
 
   assert.deepEqual(during, before);
-  assert.deepEqual(updates.slice(-2), [
-    { enableRulesetIds: ["allow_framing_ai_sites"], disableRulesetIds: [] },
-    { enableRulesetIds: [], disableRulesetIds: ["allow_framing_ai_sites"] }
-  ]);
+  assert.deepEqual(rulesetUpdates, []);
+  assert.equal(chrome.__enabledStaticRulesets.has("allow_framing_ai_sites"), false);
 });
 
 test("isFromExtensionPage accepts extension-origin senders with no tab", async () => {
@@ -414,10 +477,12 @@ function agent(overrides) {
 
 function createChromeMock(options = {}) {
   const storageData = {};
+  const enabledStaticRulesets = new Set();
   const chrome = {
     runtime: {
       id: "anyside",
       onInstalled: createEvent(),
+      onStartup: createEvent(),
       onMessage: createEvent(),
       onConnect: createEvent(),
       getURL(path) {
@@ -438,7 +503,18 @@ function createChromeMock(options = {}) {
       create() {}
     },
     declarativeNetRequest: {
-      updateEnabledRulesets: options.updateEnabledRulesets || (async () => {})
+      async updateEnabledRulesets(update) {
+        for (const id of update.disableRulesetIds ?? []) {
+          enabledStaticRulesets.delete(id);
+        }
+        for (const id of update.enableRulesetIds ?? []) {
+          enabledStaticRulesets.add(id);
+        }
+        if (options.updateEnabledRulesets) {
+          await options.updateEnabledRulesets(update);
+        }
+      },
+      updateSessionRules: options.updateSessionRules || (async () => {})
     },
     offscreen: {
       createDocument: options.createDocument || (async () => {})
@@ -478,6 +554,7 @@ function createChromeMock(options = {}) {
       }
     },
     tabs: {
+      TAB_ID_NONE: -1,
       async query() {
         return [];
       },
@@ -507,6 +584,7 @@ function createChromeMock(options = {}) {
       }
     }
   };
+  chrome.__enabledStaticRulesets = enabledStaticRulesets;
   return chrome;
 }
 

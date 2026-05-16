@@ -39,7 +39,6 @@ test("options restores services hidden from the side panel header", async () => 
     await import(`../dist/options/main.js?hidden-services-${Date.now()}`);
     await flushAsync();
 
-    assert.match(textTree(document.getElementById("compatibilityDomainList")), /www\.perplexity\.ai/);
     assert.match(textTree(document.getElementById("hiddenServiceList")), /Show Claude/);
 
     const restoreButton = findByDataset(document.getElementById("hiddenServiceList"), "restoreServiceId", "claude");
@@ -65,7 +64,6 @@ function createOptionsDocument() {
     "hiddenServiceList",
     "customUrlList",
     "promptTemplateList",
-    "compatibilityDomainList",
     "statusText",
     "aboutVersion"
   ]) {
@@ -77,7 +75,7 @@ function createOptionsDocument() {
   for (const id of ["promptSubmitButton", "resetSettingsButton"]) {
     document.register(new FakeButtonElement(id, document));
   }
-  for (const id of ["customLabelInput", "customUrlInput", "promptTitleInput", "promptCategoryInput", "dnrToggle"]) {
+  for (const id of ["customLabelInput", "customUrlInput", "promptTitleInput", "promptCategoryInput"]) {
     document.register(new FakeInputElement(id, document));
   }
   document.register(new FakeInputElement("promptBodyInput", document));

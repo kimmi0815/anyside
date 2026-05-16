@@ -1,5 +1,4 @@
-import { Messages } from "../shared/messages.js";
-import { BUILT_IN_PRESETS, CUSTOM_PRESET_ID, DEFAULT_PRESET_ID, FRAME_COMPATIBILITY_DOMAINS, makeCustomPresetId } from "../shared/presets.js";
+import { BUILT_IN_PRESETS, CUSTOM_PRESET_ID, DEFAULT_PRESET_ID, makeCustomPresetId } from "../shared/presets.js";
 import { defaultSettings, getSettings, normalizeSettings, saveSettings, SETTINGS_KEY } from "../shared/storage.js";
 import {
   CUSTOM_PROMPT_TEMPLATES_KEY,
@@ -10,7 +9,7 @@ import {
   updateCustomPromptTemplate
 } from "../storage/promptTemplateStorage.js";
 import type { PromptTemplate } from "../features/composer/types.js";
-import type { ActivePresetId, CustomUrl, RuntimeMessage, RuntimeResponse, Settings } from "../shared/types.js";
+import type { ActivePresetId, CustomUrl, Settings } from "../shared/types.js";
 import { labelFromUrl, normalizeUserUrl } from "../shared/url.js";
 
 const hiddenServiceList = element<HTMLElement>("hiddenServiceList");
@@ -24,8 +23,6 @@ const promptCategoryInput = element<HTMLInputElement>("promptCategoryInput");
 const promptBodyInput = element<HTMLTextAreaElement>("promptBodyInput");
 const promptSubmitButton = element<HTMLButtonElement>("promptSubmitButton");
 const promptTemplateList = element<HTMLElement>("promptTemplateList");
-const dnrToggle = element<HTMLInputElement>("dnrToggle");
-const compatibilityDomainList = element<HTMLElement>("compatibilityDomainList");
 const resetSettingsButton = element<HTMLButtonElement>("resetSettingsButton");
 const statusText = element<HTMLElement>("statusText");
 const aboutVersion = element<HTMLElement>("aboutVersion");
@@ -61,10 +58,6 @@ function bindEvents(): void {
       return;
     }
     void restoreHiddenService(target.dataset.restoreServiceId as ActivePresetId);
-  });
-
-  dnrToggle.addEventListener("change", () => {
-    void setDnrEnabled(dnrToggle.checked);
   });
 
   customUrlForm.addEventListener("submit", (event) => {
@@ -217,17 +210,6 @@ function render(): void {
   renderHiddenServices();
   renderCustomUrls();
   renderPromptTemplates();
-  renderCompatibilityDomains();
-  dnrToggle.checked = settings.enableFrameHeaderRelaxation;
-}
-
-function renderCompatibilityDomains(): void {
-  compatibilityDomainList.textContent = "";
-  for (const domain of FRAME_COMPATIBILITY_DOMAINS) {
-    const item = document.createElement("li");
-    item.textContent = domain;
-    compatibilityDomainList.append(item);
-  }
 }
 
 function renderVersion(): void {
@@ -729,18 +711,6 @@ async function resetSettings(): Promise<void> {
   resetSettingsButton.disabled = true;
 
   try {
-    if (settings.enableFrameHeaderRelaxation !== defaults.enableFrameHeaderRelaxation) {
-      const response = await sendMessage({
-        type: Messages.SET_DNR_ENABLED,
-        enabled: defaults.enableFrameHeaderRelaxation
-      });
-
-      if (!response.ok) {
-        setStatus(response.error || "Could not reset iframe compatibility mode.");
-        return;
-      }
-    }
-
     settings = await saveSettings(defaults);
     customLabelInput.value = "";
     customUrlInput.value = "";
@@ -749,22 +719,6 @@ async function resetSettings(): Promise<void> {
   } finally {
     resetSettingsButton.disabled = false;
   }
-}
-
-async function setDnrEnabled(enabled: boolean): Promise<void> {
-  dnrToggle.disabled = true;
-  const response = await sendMessage({ type: Messages.SET_DNR_ENABLED, enabled });
-  dnrToggle.disabled = false;
-
-  if (!response.ok || !response.settings) {
-    dnrToggle.checked = settings.enableFrameHeaderRelaxation;
-    setStatus(response.error || "Could not update iframe compatibility mode.");
-    return;
-  }
-
-  settings = response.settings;
-  render();
-  setStatus(`Iframe compatibility mode ${enabled ? "enabled" : "disabled"}.`);
 }
 
 async function migrateBareCustomDefault(): Promise<void> {
@@ -941,14 +895,6 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
-  }
-}
-
-async function sendMessage(message: RuntimeMessage): Promise<RuntimeResponse> {
-  try {
-    return await chrome.runtime.sendMessage(message);
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 

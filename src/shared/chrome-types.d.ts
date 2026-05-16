@@ -65,7 +65,27 @@ declare namespace chrome {
   }
 
   namespace declarativeNetRequest {
+    type HeaderOperation = "remove" | "set" | "append";
+    type ResourceType = "main_frame" | "sub_frame" | "stylesheet" | "script" | "image" | "font" | "object" | "xmlhttprequest" | "ping" | "csp_report" | "media" | "websocket" | "webtransport" | "webbundle" | "other";
+    type RuleAction = {
+      type: "modifyHeaders";
+      responseHeaders: Array<{ header: string; operation: HeaderOperation; value?: string }>;
+    };
+    type RuleCondition = {
+      requestDomains?: string[];
+      resourceTypes?: ResourceType[];
+      tabIds?: number[];
+      initiatorDomains?: string[];
+    };
+    type Rule = {
+      id: number;
+      priority?: number;
+      action: RuleAction;
+      condition: RuleCondition;
+    };
+
     function updateEnabledRulesets(options: { enableRulesetIds?: string[]; disableRulesetIds?: string[] }): Promise<void>;
+    function updateSessionRules(options: { addRules?: Rule[]; removeRuleIds?: number[] }): Promise<void>;
   }
 
   namespace offscreen {
@@ -103,6 +123,8 @@ declare namespace chrome {
   }
 
   namespace tabs {
+    const TAB_ID_NONE: number;
+
     type Tab = {
       id?: number;
       windowId?: number;

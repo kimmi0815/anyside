@@ -26,10 +26,6 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16l-7-4-7 4z" stroke-linejoin="round"/></svg>
             <span>Prompts</span>
           </a>
-          <a href="#compatibility" class="nav-item" data-target="compatibility">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 4-9 4-9-4 9-4z"/><path d="M3 12l9 4 9-4M3 17l9 4 9-4" stroke-linejoin="round"/></svg>
-            <span>Compatibility</span>
-          </a>
           <a href="#about" class="nav-item" data-target="about">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01M11 12h1v5h1" stroke-linecap="round"/></svg>
             <span>About</span>
@@ -42,7 +38,7 @@
       <main class="content" id="top">
         <header class="hero">
           <h1>Settings</h1>
-          <p>Manage your services, prompt library, and compatibility options. The side panel handles day-to-day switching.</p>
+          <p>Manage your services and prompt library. The side panel handles day-to-day switching.</p>
         </header>
 
         <section id="services" class="card">
@@ -98,19 +94,6 @@
           <p class="hint">Available variables: <code>{{title}}</code> <code>{{url}}</code> <code>{{selection}}</code> <code>{{date}}</code> <code>{{service}}</code></p>
 
           <div id="promptTemplateList" class="card-list"></div>
-        </section>
-
-        <section id="compatibility" class="card">
-          <div class="card-head">
-            <h2>Iframe compatibility</h2>
-            <p>Off by default. Enable only if a built-in AI service refuses to load inside the side panel.</p>
-          </div>
-          <label class="toggle-row">
-            <input id="dnrToggle" type="checkbox">
-            <span>Relax frame-blocking headers for built-in AI subframes</span>
-          </label>
-          <p class="hint">Chrome applies these rules browser-wide while enabled, not only inside anyside. Custom URLs and main-frame browsing are never modified. Fallback window mode is the safer alternative when iframe loading is unreliable.</p>
-          <ul id="compatibilityDomainList" class="domain-list" aria-label="Domains affected by iframe compatibility mode"></ul>
         </section>
 
         <section id="about" class="card about-card">

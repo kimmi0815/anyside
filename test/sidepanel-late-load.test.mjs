@@ -154,6 +154,7 @@ test("side panel prompt palette includes custom prompt templates from storage", 
 test("side panel service switcher loads registered services and custom URLs", async () => {
   const scheduler = createScheduler();
   const document = createSidepanelDocument();
+  const runtimeMessages = [];
   const storageData = {
     "anyside.settings": {
       defaultPresetId: "chatgpt",
@@ -201,6 +202,13 @@ test("side panel service switcher loads registered services and custom URLs", as
     clearInterval: scheduler.clearInterval
   };
   globalThis.chrome = createChromeMock(storageData);
+  globalThis.chrome.runtime.sendMessage = async (message) => {
+    runtimeMessages.push(message);
+    if (message.type === "START_FRAME_COMPATIBILITY_SESSION") {
+      return { ok: true, frameCompatibilitySessionId: `session-${runtimeMessages.length}` };
+    }
+    return { ok: true };
+  };
 
   try {
     await import(`../dist/sidepanel/main.js?service-switcher-${Date.now()}`);
@@ -216,7 +224,14 @@ test("side panel service switcher loads registered services and custom URLs", as
     );
     assert.equal(document.getElementById("serviceSwitcher").children[0].dataset.presetId, "claude");
     assert.equal(document.getElementById("moreActionsButton").hidden, false);
+    assert.equal(document.getElementById("moreActionsButton").attributes["aria-label"], "Open settings");
     assert.equal(document.getElementById("headerReloadButton").attributes["aria-label"], "Reload current service");
+    assert.deepEqual(runtimeMessages[0], {
+      type: "START_FRAME_COMPATIBILITY_SESSION",
+      presetId: "chatgpt",
+      url: "https://chatgpt.com/",
+      enabled: true
+    });
 
     const claudeButton = document
       .getElementById("serviceSwitcher")
@@ -228,16 +243,34 @@ test("side panel service switcher loads registered services and custom URLs", as
     assert.equal(document.getElementById("aiFrame").src, "https://claude.ai/");
     assert.equal(storageData["anyside.settings"].defaultPresetId, "claude");
     assert.match(document.getElementById("statusText").textContent, /Loading Claude/);
+    assert.equal(
+      runtimeMessages.some(
+        (message) =>
+          message.type === "START_FRAME_COMPATIBILITY_SESSION" &&
+          message.presetId === "claude" &&
+          message.enabled === true
+      ),
+      true
+    );
 
     const customButton = document
       .getElementById("serviceSwitcher")
       .children.find((child) => child.dataset.presetId === "custom:research");
+    const messagesBeforeCustom = runtimeMessages.length;
     document.getElementById("serviceSwitcher").dispatch("click", { target: customButton });
+    await flushAsync();
     await flushAsync();
 
     assert.equal(document.getElementById("aiFrame").src, "https://research.example.com/");
     assert.equal(storageData["anyside.settings"].defaultPresetId, "custom:research");
+    assert.equal(
+      runtimeMessages
+        .slice(messagesBeforeCustom)
+        .some((message) => message.type === "START_FRAME_COMPATIBILITY_SESSION"),
+      false
+    );
     document.getElementById("headerReloadButton").dispatch("click");
+    await flushAsync();
     assert.equal(document.getElementById("aiFrame").src, "https://research.example.com/");
     assert.match(document.getElementById("statusText").textContent, /Loading Research/);
 
@@ -354,6 +387,114 @@ test("side panel composer menus close from toggles and the dismiss layer", async
   } finally {
     delete globalThis.chrome;
     delete globalThis.document;
+    delete globalThis.window;
+    delete globalThis.HTMLElement;
+    delete globalThis.Element;
+    delete globalThis.Node;
+    delete globalThis.HTMLButtonElement;
+    delete globalThis.HTMLDetailsElement;
+    delete globalThis.HTMLIFrameElement;
+    delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLImageElement;
+    delete globalThis.HTMLTableSectionElement;
+  }
+});
+
+test("side panel does not request active tab context before a user action", async () => {
+  const scheduler = createScheduler();
+  const document = createSidepanelDocument();
+  const storageData = {
+    "composer.promptTemplates": [
+      {
+        id: "custom:context",
+        title: "Context Prompt",
+        category: "Test",
+        body: "Page: {{title}}\n{{url}}\n{{selection}}",
+        favorite: false,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ]
+  };
+  const runtimeMessages = [];
+
+  globalThis.HTMLElement = FakeElement;
+  globalThis.Element = FakeElement;
+  globalThis.Node = FakeElement;
+  globalThis.HTMLButtonElement = FakeButtonElement;
+  globalThis.HTMLDetailsElement = FakeElement;
+  globalThis.HTMLIFrameElement = FakeIFrameElement;
+  globalThis.HTMLInputElement = FakeInputElement;
+  globalThis.HTMLImageElement = FakeImageElement;
+  globalThis.HTMLTableSectionElement = FakeElement;
+  globalThis.document = document;
+  globalThis.localStorage = createLocalStorage();
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    writable: true,
+    value: {
+      clipboard: {
+        async writeText() {}
+      }
+    }
+  });
+  globalThis.window = {
+    location: { search: "" },
+    addEventListener() {},
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    setInterval: scheduler.setInterval,
+    clearInterval: scheduler.clearInterval
+  };
+  globalThis.chrome = createChromeMock(storageData);
+  globalThis.chrome.runtime.sendMessage = async (message) => {
+    runtimeMessages.push(message);
+    if (message.type === "GET_PAGE_CONTEXT") {
+      return {
+        ok: true,
+        pageContext: {
+          title: "Example page",
+          url: "https://example.com/article",
+          selection: "selected text",
+          timestamp: 1
+        }
+      };
+    }
+    if (message.type === "INSERT_TEXT_TO_AI") {
+      return {
+        ok: true,
+        insertResult: {
+          success: true,
+          method: "direct",
+          service: message.service,
+          reason: "inserted"
+        }
+      };
+    }
+    return { ok: true };
+  };
+
+  try {
+    await import(`../dist/sidepanel/main.js?context-boundary-${Date.now()}`);
+    await flushAsync();
+    scheduler.runByDelay(0);
+    document.getElementById("aiFrame").dispatch("load");
+
+    assert.equal(runtimeMessages.some((message) => message.type === "GET_PAGE_CONTEXT"), false);
+
+    document.getElementById("promptButton").dispatch("click");
+    await flushAsync();
+    const promptRow = document.getElementById("promptList").children[0];
+    document.getElementById("promptList").dispatch("click", { target: promptRow });
+    await flushAsync();
+
+    assert.equal(runtimeMessages.filter((message) => message.type === "GET_PAGE_CONTEXT").length, 1);
+    assert.equal(runtimeMessages.some((message) => message.type === "INSERT_TEXT_TO_AI"), true);
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.document;
+    delete globalThis.localStorage;
+    delete globalThis.navigator;
     delete globalThis.window;
     delete globalThis.HTMLElement;
     delete globalThis.Element;
@@ -631,6 +772,21 @@ function createDataTransfer() {
     },
     getData(type) {
       return this.data[type] || "";
+    }
+  };
+}
+
+function createLocalStorage() {
+  const values = new Map();
+  return {
+    getItem(key) {
+      return values.has(key) ? values.get(key) : null;
+    },
+    setItem(key, value) {
+      values.set(key, String(value));
+    },
+    removeItem(key) {
+      values.delete(key);
     }
   };
 }

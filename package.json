@@ -11,9 +11,10 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "build": "npm run clean && tsc -p tsconfig.json && node scripts/build.mjs --bundle-content",
+    "build:test": "npm run clean && tsc -p tsconfig.json && node scripts/build.mjs --bundle-content --testing-hooks",
     "build:local": "node scripts/build.mjs --strip-types",
-    "test": "npm run typecheck && npm run build && node --test test/*.test.mjs",
-    "release:zip": "npm run typecheck && npm run build && node scripts/package-extension.mjs"
+    "test": "npm run typecheck && npm run build:test && node --test test/*.test.mjs",
+    "release:zip": "npm run typecheck && npm run build && node scripts/package-extension.mjs && node scripts/audit-release-artifact.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

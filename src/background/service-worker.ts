@@ -1,18 +1,20 @@
 import { Messages } from "../shared/messages.js";
 import { detectAIService } from "../features/composer/lib/aiService.js";
+import { FRAME_COMPATIBILITY_DOMAINS, isBuiltInPresetId } from "../shared/presets.js";
 import { createActiveTabPrompt, createSelectionPrompt } from "../shared/prompt.js";
-import { FALLBACK_WINDOW_KEY, getSettings, saveSettings } from "../shared/storage.js";
+import { FALLBACK_WINDOW_KEY, getSettings } from "../shared/storage.js";
 import type { AIInputInsertReason, AIService, InsertResult, PageContext } from "../features/composer/types.js";
-import type { FallbackWindowState, RuntimeMessage, RuntimeResponse } from "../shared/types.js";
+import type { FallbackWindowState, PresetId, RuntimeMessage, RuntimeResponse } from "../shared/types.js";
 
 const DNR_RULESET_ID = "allow_framing_ai_sites";
+const DNR_SESSION_RULE_ID = 1001;
 const OFFSCREEN_DOCUMENT_PATH = "src/offscreen/clipboard.html";
 const MENU_SELECTION_ID = "ask-anyside-selection";
 const MENU_OPEN_ID = "open-anyside";
 const LEGACY_FALLBACK_WINDOW_KEY = "aiSidecar.fallbackWindow";
 const AI_INPUT_AGENT_PORT = "ai-input-agent";
 const INSERT_TIMEOUT_MS = 3000;
-const DNR_DIAGNOSTIC_SESSION_TTL_MS = 30000;
+const FRAME_COMPATIBILITY_SESSION_TTL_MS = 30000;
 
 type AiAgentRecord = {
   port: chrome.runtime.Port;
@@ -63,12 +65,13 @@ let initializationPromise: Promise<void> | undefined;
 let offscreenDocumentPromise: Promise<void> | undefined;
 let dnrMutationPromise: Promise<void> = Promise.resolve();
 
-type DnrDiagnosticSession = {
+type FrameCompatibilitySession = {
   id: string;
+  ruleActive: boolean;
   timer: ReturnType<typeof setTimeout>;
 };
 
-const dnrDiagnosticSessions = new Map<string, DnrDiagnosticSession>();
+const frameCompatibilitySessions = new Map<string, FrameCompatibilitySession>();
 
 function ensureInitialized(options: { resetMenus: boolean } = { resetMenus: false }): Promise<void> {
   if (!initializationPromise) {
@@ -82,6 +85,13 @@ function ensureInitialized(options: { resetMenus: boolean } = { resetMenus: fals
 
 chrome.runtime.onInstalled.addListener(() => {
   initializationPromise = initializeExtension({ resetMenus: true }).catch((error) => {
+    initializationPromise = undefined;
+    throw error;
+  });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  initializationPromise = initializeExtension({ resetMenus: false }).catch((error) => {
     initializationPromise = undefined;
     throw error;
   });
@@ -165,9 +175,9 @@ chrome.windows.onRemoved.addListener((windowId) => {
 void ensureInitialized();
 
 async function initializeExtension(options: { resetMenus: boolean }): Promise<void> {
-  const settings = await getSettings();
+  await getSettings();
   await configureSidePanel();
-  await syncDnrFromStorage(settings.enableFrameHeaderRelaxation);
+  await recoverFrameCompatibilityRules();
   if (options.resetMenus) {
     await createContextMenus();
   }
@@ -203,18 +213,13 @@ async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runt
   await ensureInitialized();
 
   switch (message?.type) {
-    case Messages.SET_DNR_ENABLED: {
-      const settings = await setDnrEnabled(message.enabled, message.changeId);
-      return { ok: true, settings };
+    case Messages.START_FRAME_COMPATIBILITY_SESSION: {
+      const sessionId = await startFrameCompatibilitySession(message.presetId, message.url, message.enabled);
+      return { ok: true, frameCompatibilitySessionId: sessionId };
     }
 
-    case Messages.START_DNR_DIAGNOSTIC_SESSION: {
-      const sessionId = await startDnrDiagnosticSession(message.enabled);
-      return { ok: true, dnrDiagnosticSessionId: sessionId };
-    }
-
-    case Messages.END_DNR_DIAGNOSTIC_SESSION: {
-      await endDnrDiagnosticSession(message.sessionId);
+    case Messages.END_FRAME_COMPATIBILITY_SESSION: {
+      await endFrameCompatibilitySession(message.sessionId);
       return { ok: true, settings: await getSettings() };
     }
 
@@ -528,70 +533,49 @@ function getSenderDocumentId(sender: chrome.runtime.MessageSender | undefined): 
   return (sender as (chrome.runtime.MessageSender & { documentId?: string }) | undefined)?.documentId;
 }
 
-async function syncDnrFromStorage(enabled?: boolean): Promise<void> {
-  try {
-    const nextEnabled = enabled ?? (await getSettings()).enableFrameHeaderRelaxation;
-    await applyDnrSetting(nextEnabled);
-  } catch (error) {
-    await applyDnrSetting(false).catch(() => undefined);
-    throw error;
-  }
-}
-
-async function setDnrEnabled(enabled: boolean, changeId: string = crypto.randomUUID()) {
+async function startFrameCompatibilitySession(presetId: PresetId, url: string, enabled: boolean): Promise<string> {
   return withDnrMutation(async () => {
-    const previousSettings = await getSettings();
-    const previousEnabled = previousSettings.enableFrameHeaderRelaxation;
-    await applyDnrSetting(enabled);
+    const id = crypto.randomUUID();
+    const ruleActive = enabled && isFrameCompatibilityTarget(presetId, url);
+    const timer = setTimeout(() => {
+      void endFrameCompatibilitySession(id);
+    }, FRAME_COMPATIBILITY_SESSION_TTL_MS);
+    (timer as { unref?: () => void }).unref?.();
+    const session: FrameCompatibilitySession = {
+      id,
+      ruleActive,
+      timer
+    };
+    frameCompatibilitySessions.set(id, session);
+
+    if (!ruleActive) {
+      return id;
+    }
 
     try {
-      return await saveSettings({
-        ...previousSettings,
-        enableFrameHeaderRelaxation: enabled,
-        frameHeaderRelaxationAcknowledged: previousSettings.frameHeaderRelaxationAcknowledged || enabled,
-        frameHeaderRelaxationChangeId: changeId
-      });
+      await syncFrameCompatibilitySessionRules();
+      return id;
     } catch (error) {
-      await applyDnrSetting(previousEnabled).catch(() => undefined);
+      clearTimeout(timer);
+      frameCompatibilitySessions.delete(id);
+      await syncFrameCompatibilitySessionRules().catch(() => undefined);
       throw error;
     }
   });
 }
 
-async function applyDnrSetting(enabled: boolean): Promise<void> {
-  const update = enabled
-    ? { enableRulesetIds: [DNR_RULESET_ID], disableRulesetIds: [] }
-    : { enableRulesetIds: [], disableRulesetIds: [DNR_RULESET_ID] };
-  await chrome.declarativeNetRequest.updateEnabledRulesets(update);
-}
-
-async function startDnrDiagnosticSession(enabled: boolean): Promise<string> {
-  return withDnrMutation(async () => {
-    const id = crypto.randomUUID();
-    await applyDnrSetting(enabled);
-    const timer = setTimeout(() => {
-      void endDnrDiagnosticSession(id);
-    }, DNR_DIAGNOSTIC_SESSION_TTL_MS);
-
-    dnrDiagnosticSessions.set(id, {
-      id,
-      timer
-    });
-    return id;
-  });
-}
-
-async function endDnrDiagnosticSession(sessionId: string): Promise<void> {
+async function endFrameCompatibilitySession(sessionId: string): Promise<void> {
   await withDnrMutation(async () => {
-    const session = dnrDiagnosticSessions.get(sessionId);
+    const session = frameCompatibilitySessions.get(sessionId);
     if (!session) {
       return;
     }
 
+    frameCompatibilitySessions.delete(sessionId);
     clearTimeout(session.timer);
-    dnrDiagnosticSessions.delete(sessionId);
-    const settings = await getSettings().catch(() => undefined);
-    await applyDnrSetting(settings?.enableFrameHeaderRelaxation === true);
+    if (session.ruleActive) {
+      await syncFrameCompatibilitySessionRules();
+    }
   });
 }
 
@@ -602,6 +586,60 @@ async function withDnrMutation<T>(operation: () => Promise<T>): Promise<T> {
     () => undefined
   );
   return run;
+}
+
+async function recoverFrameCompatibilityRules(): Promise<void> {
+  await withDnrMutation(async () => {
+    for (const session of frameCompatibilitySessions.values()) {
+      clearTimeout(session.timer);
+    }
+    frameCompatibilitySessions.clear();
+    await chrome.declarativeNetRequest.updateEnabledRulesets({
+      enableRulesetIds: [],
+      disableRulesetIds: [DNR_RULESET_ID]
+    });
+    await syncFrameCompatibilitySessionRules();
+  });
+}
+
+async function syncFrameCompatibilitySessionRules(): Promise<void> {
+  const hasActiveSession = [...frameCompatibilitySessions.values()].some((session) => session.ruleActive);
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [DNR_SESSION_RULE_ID],
+    addRules: hasActiveSession ? [createFrameCompatibilitySessionRule()] : []
+  });
+}
+
+function createFrameCompatibilitySessionRule(): chrome.declarativeNetRequest.Rule {
+  return {
+    id: DNR_SESSION_RULE_ID,
+    priority: 1,
+    action: {
+      type: "modifyHeaders",
+      responseHeaders: [
+        { header: "x-frame-options", operation: "remove" },
+        { header: "content-security-policy", operation: "remove" }
+      ]
+    },
+    condition: {
+      requestDomains: [...FRAME_COMPATIBILITY_DOMAINS],
+      resourceTypes: ["sub_frame"],
+      tabIds: [chrome.tabs.TAB_ID_NONE],
+      initiatorDomains: [chrome.runtime.id]
+    }
+  };
+}
+
+function isFrameCompatibilityTarget(presetId: PresetId, url: string): boolean {
+  if (!isBuiltInPresetId(presetId)) {
+    return false;
+  }
+
+  try {
+    return FRAME_COMPATIBILITY_DOMAINS.includes(new URL(url).hostname);
+  } catch {
+    return false;
+  }
 }
 
 async function openSidePanel(windowId?: number): Promise<void> {
@@ -672,9 +710,10 @@ async function createOffscreenDocumentIfNeeded(): Promise<void> {
 export const __testing = {
   ensureOffscreenDocument,
   selectAiInputAgent,
-  setDnrEnabled,
-  startDnrDiagnosticSession,
-  endDnrDiagnosticSession,
+  startFrameCompatibilitySession,
+  endFrameCompatibilitySession,
+  recoverFrameCompatibilityRules,
+  createFrameCompatibilitySessionRule,
   isFromExtensionPage,
   isAllowedFallbackUrl,
   handleRuntimeMessage,

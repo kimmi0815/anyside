@@ -17,6 +17,7 @@ test("release:zip runs typecheck and the standard build before packaging", async
   assert.match(releaseScript, /npm run typecheck/);
   assert.match(releaseScript, /npm run build/);
   assert.match(releaseScript, /node scripts\/package-extension\.mjs/);
+  assert.match(releaseScript, /node scripts\/audit-release-artifact\.mjs/);
 });
 
 test("standard build cleans dist before compiling and bundling content scripts", async () => {
@@ -27,6 +28,27 @@ test("standard build cleans dist before compiling and bundling content scripts",
   assert.match(buildScript, /tsc -p tsconfig\.json/);
   assert.match(buildScript, /node scripts\/build\.mjs --bundle-content/);
   assert.equal(await exists(join(root, "dist/features/composer/lib/detectAIService.js")), false);
+});
+
+test("test script uses a hook-enabled build artifact", async () => {
+  const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+
+  assert.match(packageJson.scripts["build:test"], /node scripts\/build\.mjs --bundle-content --testing-hooks/);
+  assert.match(packageJson.scripts.test, /npm run build:test/);
+});
+
+test("production build strips background test hooks while test build keeps them", async (t) => {
+  const tempRoot = await createBuildFixture(t);
+
+  await compileBundle(tempRoot);
+  const productionWorker = await readFile(join(tempRoot, "dist/background/service-worker.js"), "utf8");
+  assert.doesNotMatch(productionWorker, /__testing/);
+  assert.doesNotMatch(productionWorker, /globalThis\.__anysideBackgroundTesting/);
+
+  await compileBundle(tempRoot, ["--testing-hooks"]);
+  const testWorker = await readFile(join(tempRoot, "dist/background/service-worker.js"), "utf8");
+  assert.match(testWorker, /const __testing =/);
+  assert.match(testWorker, /globalThis\.__anysideBackgroundTesting = __testing/);
 });
 
 test("package-extension does not import the local experimental build helper", async () => {
@@ -161,6 +183,30 @@ async function exists(path) {
   } catch {
     return false;
   }
+}
+
+async function createBuildFixture(t) {
+  const tempRoot = await mkdtemp(join(tmpdir(), "anyside-build-"));
+  t.after(() => rm(tempRoot, { recursive: true, force: true }));
+
+  await cp(join(root, "src"), join(tempRoot, "src"), { recursive: true });
+  await cp(join(root, "tsconfig.json"), join(tempRoot, "tsconfig.json"));
+
+  return tempRoot;
+}
+
+async function compileBundle(cwd, buildArgs = []) {
+  await rm(join(cwd, "dist"), { recursive: true, force: true });
+  await runCommand(process.execPath, [
+    join(root, "node_modules/typescript/bin/tsc"),
+    "-p",
+    join(cwd, "tsconfig.json")
+  ], { cwd });
+  await runCommand(process.execPath, [
+    join(root, "scripts/build.mjs"),
+    "--bundle-content",
+    ...buildArgs
+  ], { cwd });
 }
 
 function runCommand(command, args, options = {}) {

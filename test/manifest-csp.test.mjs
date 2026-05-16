@@ -43,6 +43,20 @@ test("extension_pages CSP style-src is 'self' only", async () => {
   assert.deepEqual(directives.get("style-src"), ["'self'"]);
 });
 
+test("extension_pages CSP does not allow remote or inline scripts", async () => {
+  const { directives } = await loadCspDirectives();
+  const scriptSources = directives.get("script-src") ?? [];
+  assert.deepEqual(scriptSources, ["'self'"]);
+  assertNoRemoteOrInlineSources(scriptSources);
+});
+
+test("extension_pages CSP does not allow remote styles or inline styles", async () => {
+  const { directives } = await loadCspDirectives();
+  const styleSources = directives.get("style-src") ?? [];
+  assert.deepEqual(styleSources, ["'self'"]);
+  assertNoRemoteOrInlineSources(styleSources);
+});
+
 test("extension_pages CSP connect-src restricts to self, https, and localhost only", async () => {
   const { directives } = await loadCspDirectives();
   const values = directives.get("connect-src") ?? [];
@@ -64,3 +78,13 @@ test("extension_pages CSP does not enable unsafe-inline or unsafe-eval", async (
   assert.doesNotMatch(policy, /unsafe-inline/);
   assert.doesNotMatch(policy, /unsafe-eval/);
 });
+
+function assertNoRemoteOrInlineSources(values) {
+  for (const value of values) {
+    assert.doesNotMatch(value, /^[a-z][a-z0-9+.-]*:/i, `${value} must not be a remote source`);
+    assert.notEqual(value, "*");
+    assert.notEqual(value, "'unsafe-inline'");
+    assert.doesNotMatch(value, /^'nonce-/);
+    assert.doesNotMatch(value, /^'sha(256|384|512)-/);
+  }
+}

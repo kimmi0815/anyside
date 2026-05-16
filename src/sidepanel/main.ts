@@ -1,6 +1,6 @@
 import { Messages } from "../shared/messages.js";
 import { CONTEXT_ACTIONS, PROMPT_TEMPLATES, detectAIService, renderContextTemplate, renderPromptTemplate } from "../features/composer/index.js";
-import { BUILT_IN_PRESETS, diagnosticKey, makeCustomPresetId, resolveTarget } from "../shared/presets.js";
+import { BUILT_IN_PRESETS, FRAME_COMPATIBILITY_DOMAINS, diagnosticKey, isBuiltInPresetId, makeCustomPresetId, resolveTarget } from "../shared/presets.js";
 import { getSettings, normalizeSettings, saveSettings, SETTINGS_KEY } from "../shared/storage.js";
 import { CUSTOM_PROMPT_TEMPLATES_KEY, getCustomPromptTemplates } from "../storage/promptTemplateStorage.js";
 import type { AIService, ContextMode, PageContext, PromptTemplate } from "../features/composer/types.js";
@@ -61,15 +61,14 @@ const diagnosticsEnabled = isDebugMode();
 type StatusTone = "idle" | "loading" | "success" | "warning" | "error" | "diagnostic";
 type DisplayTarget = { id: ActivePresetId; label: string; url: string };
 type ServiceOption = DisplayTarget & { iconSrc?: string; isCustom: boolean };
-type LoadOptions = { diagnostic?: { dnrEnabled: boolean } };
+type LoadOptions = { activePresetId: ActivePresetId; diagnostic?: { dnrEnabled: boolean; presetId: PresetId } };
 type ActiveDiagnostic = {
   key: string;
   token: number;
   sessionId: number;
-  dnrSessionId: string;
+  frameCompatibilitySessionId?: string;
   returnTarget?: DisplayTarget;
 };
-type FrameModeReloadSuppression = { enabled: boolean; changeId: string };
 
 let settings: Settings;
 let currentUrl = "";
@@ -85,7 +84,7 @@ let activeDiagnostic: ActiveDiagnostic | null = null;
 let diagnosticSessionId = 0;
 let pendingDiagnosticSession: number | null = null;
 let finalizingDiagnosticSession: number | null = null;
-let localFrameModeReloadSuppressions: FrameModeReloadSuppression[] = [];
+let activeFrameCompatibilitySessionId: string | undefined;
 let lastContext: PageContext | null = null;
 let promptQuery = "";
 let activePromptIndex = 0;
@@ -165,12 +164,12 @@ function bindEvents(): void {
     }
     void hideService(menuServiceId);
   });
-  fallbackReloadButton.addEventListener("click", () => reloadCurrentUrl());
+  fallbackReloadButton.addEventListener("click", () => void reloadCurrentUrl());
   fallbackOpenTabButton.addEventListener("click", () => void openCurrentInTab());
   fallbackOpenWindowButton.addEventListener("click", () => void openCurrentInFallbackWindow());
   setupOptionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
   moreActionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
-  headerReloadButton.addEventListener("click", () => reloadCurrentUrl());
+  headerReloadButton.addEventListener("click", () => void reloadCurrentUrl());
   headerChromeToggleButton.addEventListener("click", () => {
     void setSidePanelChromeCollapsed("header", !settings.sidePanelChrome.headerCollapsed);
   });
@@ -193,21 +192,12 @@ function bindEvents(): void {
       return;
     }
 
-    const previousFrameMode = settings.enableFrameHeaderRelaxation;
-    const previousFrameModeChangeId = settings.frameHeaderRelaxationChangeId;
     const previousDefaultPresetId = settings.defaultPresetId;
     const previousConfiguredTarget = resolveTarget(settings, settings.defaultPresetId);
     settings = normalizeSettings(changes[SETTINGS_KEY].newValue);
     syncSettingsUi();
 
-    const suppressFrameModeReload = previousFrameMode !== settings.enableFrameHeaderRelaxation
-      ? shouldSuppressLocalFrameModeReload(settings.enableFrameHeaderRelaxation, settings.frameHeaderRelaxationChangeId)
-      : false;
-    if (previousFrameMode !== settings.enableFrameHeaderRelaxation) {
-      if (isDiagnosticBusy()) {
-        return;
-      }
-    } else if (previousFrameModeChangeId !== settings.frameHeaderRelaxationChangeId && isDiagnosticBusy()) {
+    if (isDiagnosticBusy()) {
       return;
     }
 
@@ -220,21 +210,6 @@ function bindEvents(): void {
     if (currentUrl === target.url && currentLabel !== target.label) {
       currentLabel = target.label;
       fallbackServiceName.textContent = target.label;
-    }
-
-    if (previousFrameMode !== settings.enableFrameHeaderRelaxation) {
-      if (suppressFrameModeReload) {
-        return;
-      }
-
-      if (diagnosticsEnabled) {
-        setStatus(`Frame compatibility mode ${settings.enableFrameHeaderRelaxation ? "enabled" : "disabled"}.`, "diagnostic");
-      } else {
-        setStatus("Settings updated.", "idle");
-      }
-      if (currentUrl) {
-        reloadCurrentUrl();
-      }
     }
   });
 
@@ -262,9 +237,11 @@ function bindEvents(): void {
   }
 
   window.addEventListener("pagehide", () => {
+    void endActiveFrameCompatibilitySession();
     void cancelActiveDiagnostic("Side panel closed before the diagnostic finished.");
   });
   window.addEventListener("beforeunload", () => {
+    void endActiveFrameCompatibilitySession();
     void cancelActiveDiagnostic("Side panel unloaded before the diagnostic finished.");
   });
 }
@@ -777,13 +754,13 @@ async function loadTarget(id: ActivePresetId, label: string, url: string, option
   const changed = settings.activePresetId !== id || settings.lastUrlByPreset[id] !== url;
   settings.activePresetId = id;
   settings.lastUrlByPreset[id] = url;
-  loadUrl(label, url);
+  await loadUrl(label, url, { activePresetId: id });
   if (changed || options.forceSave) {
     await saveSettings(settings);
   }
 }
 
-function loadUrl(label: string, url: string, options: LoadOptions = {}): number {
+async function loadUrl(label: string, url: string, options: LoadOptions): Promise<{ token: number; frameCompatibilitySessionId?: string }> {
   currentUrl = url;
   currentLabel = label;
   renderServiceSwitcher();
@@ -796,6 +773,11 @@ function loadUrl(label: string, url: string, options: LoadOptions = {}): number 
   completedLoadToken = undefined;
   timedOutLoadToken = undefined;
   const frame = replaceFrameForLoad(token, url);
+  const shouldReplaceFrameCompatibilitySession =
+    !!activeFrameCompatibilitySessionId || shouldStartFrameCompatibilitySession(options.activePresetId, url, options);
+  const frameCompatibilitySessionId = shouldReplaceFrameCompatibilitySession
+    ? await replaceFrameCompatibilitySession(options.activePresetId, url, options)
+    : undefined;
   clearLoadTimers();
   setStatus(loadingStatusMessage(label, options), options.diagnostic ? "diagnostic" : "loading");
   setLoading(true);
@@ -825,7 +807,7 @@ function loadUrl(label: string, url: string, options: LoadOptions = {}): number 
 
   frame.src = url;
 
-  return token;
+  return { token, frameCompatibilitySessionId };
 }
 
 async function showSetupState(): Promise<void> {
@@ -840,6 +822,7 @@ async function showSetupState(): Promise<void> {
   setLoading(false);
   setStatus("Choose a side panel service in Options.", "idle");
   aiFrame.src = "about:blank";
+  await endActiveFrameCompatibilitySession();
   if (settings.activePresetId !== settings.defaultPresetId) {
     settings.activePresetId = settings.defaultPresetId;
     await saveSettings(settings);
@@ -852,9 +835,31 @@ function replaceFrameForLoad(token: number, expectedUrl: string): HTMLIFrameElem
   nextFrame.addEventListener("load", () => {
     completeLoad(token, expectedUrl);
   });
+  nextFrame.addEventListener("error", () => {
+    void handleFrameError(token);
+  });
   aiFrame.replaceWith(nextFrame);
   aiFrame = nextFrame;
   return nextFrame;
+}
+
+async function handleFrameError(token: number): Promise<void> {
+  if (token !== loadToken) {
+    return;
+  }
+
+  await endActiveFrameCompatibilitySession();
+  completedLoadToken = token;
+  timedOutLoadToken = undefined;
+  clearLoadTimers();
+  setLoading(false);
+  fallbackReason.textContent = defaultFallbackReason();
+  fallbackPanel.hidden = false;
+  if (activeDiagnostic?.token === token) {
+    updateActiveDiagnostic("manual-fail", "Frame failed to load.");
+    return;
+  }
+  setStatus(`${currentLabel || "Service"} failed to load.`, "warning");
 }
 
 function completeLoad(token: number, expectedUrl: string): void {
@@ -896,7 +901,7 @@ function markDiagnosticAwaitingVerification(diagnostic: ActiveDiagnostic): void 
   });
 }
 
-function reloadCurrentUrl(): void {
+async function reloadCurrentUrl(): Promise<void> {
   if (isDiagnosticBusy()) {
     setStatus("Finish the active diagnostic before reloading.", "diagnostic");
     return;
@@ -906,7 +911,7 @@ function reloadCurrentUrl(): void {
     setStatus("No URL is selected.", "warning");
     return;
   }
-  loadUrl(currentLabel || "AI service", currentUrl);
+  await loadUrl(currentLabel || "AI service", currentUrl, { activePresetId: settings.activePresetId });
 }
 
 async function openCurrentInTab(): Promise<void> {
@@ -927,32 +932,59 @@ async function openCurrentInFallbackWindow(): Promise<void> {
   );
 }
 
-function shouldSuppressLocalFrameModeReload(enabled: boolean, changeId: string | undefined): boolean {
-  if (!changeId) {
+async function replaceFrameCompatibilitySession(
+  presetId: ActivePresetId,
+  url: string,
+  options: LoadOptions
+): Promise<string | undefined> {
+  await endActiveFrameCompatibilitySession();
+  if (!isFrameCompatibilityTarget(presetId, url) || (options.diagnostic && !options.diagnostic.dnrEnabled)) {
+    return undefined;
+  }
+
+  const response = await sendMessage({
+    type: Messages.START_FRAME_COMPATIBILITY_SESSION,
+    presetId,
+    url,
+    enabled: true
+  });
+  if (!response.ok || !response.frameCompatibilitySessionId) {
+    return undefined;
+  }
+
+  activeFrameCompatibilitySessionId = response.frameCompatibilitySessionId;
+  return activeFrameCompatibilitySessionId;
+}
+
+async function endActiveFrameCompatibilitySession(sessionId = activeFrameCompatibilitySessionId): Promise<RuntimeResponse> {
+  if (!sessionId) {
+    return { ok: true };
+  }
+
+  if (activeFrameCompatibilitySessionId === sessionId) {
+    activeFrameCompatibilitySessionId = undefined;
+  }
+  return sendMessage({ type: Messages.END_FRAME_COMPATIBILITY_SESSION, sessionId });
+}
+
+function isFrameCompatibilityTarget(presetId: ActivePresetId, url: string): presetId is PresetId {
+  if (!isBuiltInPresetId(presetId)) {
     return false;
   }
 
-  const suppressionIndex = localFrameModeReloadSuppressions.findIndex(
-    (suppression) => suppression.enabled === enabled && suppression.changeId === changeId
-  );
-  if (suppressionIndex === -1) {
+  try {
+    return FRAME_COMPATIBILITY_DOMAINS.includes(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function shouldStartFrameCompatibilitySession(presetId: ActivePresetId, url: string, options: LoadOptions): boolean {
+  if (options.diagnostic && !options.diagnostic.dnrEnabled) {
     return false;
   }
 
-  localFrameModeReloadSuppressions.splice(suppressionIndex, 1);
-  return true;
-}
-
-async function startDnrDiagnostic(enabled: boolean): Promise<string> {
-  const response = await sendMessage({ type: Messages.START_DNR_DIAGNOSTIC_SESSION, enabled });
-  if (!response.ok || !response.dnrDiagnosticSessionId) {
-    throw new Error(response.error || "Could not start diagnostic compatibility session.");
-  }
-  return response.dnrDiagnosticSessionId;
-}
-
-async function endDnrDiagnostic(sessionId: string): Promise<RuntimeResponse> {
-  return sendMessage({ type: Messages.END_DNR_DIAGNOSTIC_SESSION, sessionId });
+  return isFrameCompatibilityTarget(presetId, url);
 }
 
 async function cancelActiveDiagnostic(message: string): Promise<void> {
@@ -984,13 +1016,13 @@ function currentDisplayTarget(): DisplayTarget | undefined {
   return target.url ? { id: target.id, label: target.label, url: target.url } : undefined;
 }
 
-function restoreDisplayAfterDiagnostic(target: DisplayTarget | undefined): void {
+async function restoreDisplayAfterDiagnostic(target: DisplayTarget | undefined): Promise<void> {
   if (!target?.url) {
-    void showSetupState();
+    await showSetupState();
     return;
   }
 
-  loadUrl(target.label, target.url);
+  await loadUrl(target.label, target.url, { activePresetId: target.id });
 }
 
 async function runDiagnostic(presetId: PresetId, dnrEnabled: boolean): Promise<void> {
@@ -1010,12 +1042,6 @@ async function runDiagnostic(presetId: PresetId, dnrEnabled: boolean): Promise<v
 
   try {
     const returnTarget = currentDisplayTarget();
-    const dnrSessionId = await startDnrDiagnostic(dnrEnabled);
-    if (pendingDiagnosticSession !== sessionId) {
-      await endDnrDiagnostic(dnrSessionId);
-      return;
-    }
-
     const key = diagnosticKey(presetId, dnrEnabled);
     settings.diagnostics[key] = {
       presetId,
@@ -1023,13 +1049,21 @@ async function runDiagnostic(presetId: PresetId, dnrEnabled: boolean): Promise<v
       dnrEnabled,
       status: "pending",
       startedAt: Date.now(),
-      message: `Diagnostic started with compatibility mode ${dnrEnabled ? "on" : "off"}.`
+      message: `Diagnostic started with frame-header relaxation ${modeLabel(dnrEnabled)}.`
     };
     settings = await saveSettings(settings);
     renderDiagnostics();
 
-    const token = loadUrl(preset.label, preset.url, { diagnostic: { dnrEnabled } });
-    activeDiagnostic = { key, token, sessionId, dnrSessionId, returnTarget };
+    const { token, frameCompatibilitySessionId } = await loadUrl(preset.label, preset.url, {
+      activePresetId: preset.id,
+      diagnostic: { dnrEnabled, presetId }
+    });
+    if (pendingDiagnosticSession !== sessionId) {
+      await endActiveFrameCompatibilitySession(frameCompatibilitySessionId);
+      return;
+    }
+
+    activeDiagnostic = { key, token, sessionId, frameCompatibilitySessionId, returnTarget };
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
@@ -1112,18 +1146,18 @@ async function finishDiagnostic(diagnostic: ActiveDiagnostic, status: Diagnostic
       settings = await saveSettings(settings);
       renderDiagnostics();
     }
-    const restoreResponse = await endDnrDiagnostic(diagnostic.dnrSessionId);
+    const restoreResponse = await endActiveFrameCompatibilitySession(diagnostic.frameCompatibilitySessionId);
     if (restoreResponse.ok && restoreResponse.settings) {
       settings = restoreResponse.settings;
       syncSettingsUi();
     } else if (!restoreResponse.ok) {
-      setStatus(restoreResponse.error || "Diagnostic saved, but compatibility mode could not be restored.", "error");
+      setStatus(restoreResponse.error || "Diagnostic saved, but frame-header relaxation could not be restored.", "error");
     }
-    restoreDisplayAfterDiagnostic(diagnostic.returnTarget);
+    await restoreDisplayAfterDiagnostic(diagnostic.returnTarget);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
-    await endDnrDiagnostic(diagnostic.dnrSessionId).catch(() => undefined);
-    restoreDisplayAfterDiagnostic(diagnostic.returnTarget);
+    await endActiveFrameCompatibilitySession(diagnostic.frameCompatibilitySessionId).catch(() => undefined);
+    await restoreDisplayAfterDiagnostic(diagnostic.returnTarget);
   } finally {
     if (finalizingDiagnosticSession === diagnostic.sessionId) {
       finalizingDiagnosticSession = null;
@@ -1133,10 +1167,8 @@ async function finishDiagnostic(diagnostic: ActiveDiagnostic, status: Diagnostic
 }
 
 function syncSettingsUi(): void {
-  const compatibilityState = settings.enableFrameHeaderRelaxation ? "on" : "off";
-  const settingsLabel = `Open settings. Frame compatibility mode is ${compatibilityState}.`;
-  moreActionsButton.title = settingsLabel;
-  moreActionsButton.setAttribute("aria-label", settingsLabel);
+  moreActionsButton.title = "Open settings";
+  moreActionsButton.setAttribute("aria-label", "Open settings");
   syncSidePanelChromeUi();
   renderServiceSwitcher();
   renderDiagnostics();
@@ -1313,8 +1345,8 @@ function runButtons(presetId: PresetId): HTMLTableCellElement {
   const td = document.createElement("td");
   const wrap = document.createElement("div");
   wrap.className = "mini-actions";
-  wrap.append(diagnosticButton("Run off", presetId, false, "runDnr"));
-  wrap.append(diagnosticButton("Run on", presetId, true, "runDnr"));
+  wrap.append(diagnosticButton("Run skipped", presetId, false, "runDnr"));
+  wrap.append(diagnosticButton("Run applied", presetId, true, "runDnr"));
   td.append(wrap);
   return td;
 }
@@ -1323,10 +1355,10 @@ function markButtons(presetId: PresetId): HTMLTableCellElement {
   const td = document.createElement("td");
   const wrap = document.createElement("div");
   wrap.className = "mini-actions";
-  wrap.append(markButton("Off visible", presetId, false, "manual-pass"));
-  wrap.append(markButton("Off blocked", presetId, false, "manual-fail"));
-  wrap.append(markButton("On visible", presetId, true, "manual-pass"));
-  wrap.append(markButton("On blocked", presetId, true, "manual-fail"));
+  wrap.append(markButton("Skipped visible", presetId, false, "manual-pass"));
+  wrap.append(markButton("Skipped blocked", presetId, false, "manual-fail"));
+  wrap.append(markButton("Applied visible", presetId, true, "manual-pass"));
+  wrap.append(markButton("Applied blocked", presetId, true, "manual-fail"));
   td.append(wrap);
   return td;
 }
@@ -1404,7 +1436,7 @@ function updateElapsedText(): void {
 
 function loadingStatusMessage(label: string, options: LoadOptions): string {
   if (options.diagnostic) {
-    return `Diagnostic: loading ${label} with compatibility mode ${modeLabel(options.diagnostic.dnrEnabled)}.`;
+    return `Diagnostic: loading ${label} with frame-header relaxation ${modeLabel(options.diagnostic.dnrEnabled)}.`;
   }
 
   return `Loading ${label}...`;
@@ -1412,7 +1444,7 @@ function loadingStatusMessage(label: string, options: LoadOptions): string {
 
 function loadNoticeMessage(label: string, options: LoadOptions): string {
   if (options.diagnostic) {
-    return `Diagnostic is still loading ${label} with compatibility mode ${modeLabel(options.diagnostic.dnrEnabled)}.`;
+    return `Diagnostic is still loading ${label} with frame-header relaxation ${modeLabel(options.diagnostic.dnrEnabled)}.`;
   }
 
   return `${label} is still loading. You can keep waiting or open it outside the frame.`;
@@ -1420,7 +1452,7 @@ function loadNoticeMessage(label: string, options: LoadOptions): string {
 
 function timeoutStatusMessage(label: string, options: LoadOptions): string {
   if (options.diagnostic) {
-    return `Diagnostic timed out for ${label} with compatibility mode ${modeLabel(options.diagnostic.dnrEnabled)}.`;
+    return `Diagnostic timed out for ${label} with frame-header relaxation ${modeLabel(options.diagnostic.dnrEnabled)}.`;
   }
 
   return `${label} timed out. Fallback options are available.`;
@@ -1440,7 +1472,7 @@ function defaultFallbackReason(): string {
 }
 
 function modeLabel(enabled: boolean): string {
-  return enabled ? "on" : "off";
+  return enabled ? "applied" : "skipped";
 }
 
 function canonicalUrl(value: string): string {

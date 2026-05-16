@@ -24,7 +24,7 @@ async function collectTypescriptFiles(dir) {
   return files;
 }
 
-async function stripTypesBuild() {
+async function stripTypesBuild(options = {}) {
   const { stripTypeScriptTypes } = await import("node:module");
   await rm(distDir, { recursive: true, force: true });
 
@@ -43,7 +43,8 @@ async function stripTypesBuild() {
   });
   await bundleClassicScript(BACKGROUND_ENTRY, {
     label: "background service worker",
-    footer: "globalThis.__anysideBackgroundTesting = __testing;"
+    keepTestingHooks: options.keepTestingHooks,
+    footer: options.keepTestingHooks ? "globalThis.__anysideBackgroundTesting = __testing;" : undefined
   });
   console.log(`Built ${files.length} TypeScript files into dist/.`);
 }
@@ -55,7 +56,9 @@ async function bundleClassicScript(entry, options) {
     const source = await readFile(modulePath, "utf8");
     chunks.push({
       modulePath: relative(distDir, modulePath),
-      source: stripModuleSyntax(source, modulePath)
+      source: stripModuleSyntax(source, modulePath, {
+        keepTestingHooks: options.keepTestingHooks === true
+      })
     });
   }
 
@@ -112,11 +115,16 @@ function resolveImport(importer, specifier) {
   return resolve(dirname(importer), specifier);
 }
 
-function stripModuleSyntax(source, fileName) {
+function stripModuleSyntax(source, fileName, options = {}) {
   const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const removals = [];
 
   for (const statement of sourceFile.statements) {
+    if (!options.keepTestingHooks && isTestingExportStatement(statement)) {
+      removals.push([statement.getFullStart(), statement.end]);
+      continue;
+    }
+
     if (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) {
       removals.push([statement.getFullStart(), statement.end]);
       continue;
@@ -131,6 +139,21 @@ function stripModuleSyntax(source, fileName) {
   }
 
   return applyRemovals(source, removals).replace(/[ \t]+$/gm, "");
+}
+
+function isTestingExportStatement(statement) {
+  if (!ts.isVariableStatement(statement)) {
+    return false;
+  }
+
+  const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) ?? [] : [];
+  if (!modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+    return false;
+  }
+
+  return statement.declarationList.declarations.some((declaration) =>
+    ts.isIdentifier(declaration.name) && declaration.name.text === "__testing"
+  );
 }
 
 function applyRemovals(source, removals) {
@@ -154,16 +177,18 @@ function indent(source) {
 }
 
 const args = new Set(process.argv.slice(2));
+const keepTestingHooks = args.has("--testing-hooks");
 if (args.has("--bundle-content")) {
   await bundleClassicScript(CONTENT_SCRIPT_ENTRY, {
     label: "content script"
   });
   await bundleClassicScript(BACKGROUND_ENTRY, {
     label: "background service worker",
-    footer: "globalThis.__anysideBackgroundTesting = __testing;"
+    keepTestingHooks,
+    footer: keepTestingHooks ? "globalThis.__anysideBackgroundTesting = __testing;" : undefined
   });
 } else if (args.has("--strip-types")) {
-  await stripTypesBuild();
+  await stripTypesBuild({ keepTestingHooks });
 } else {
-  throw new Error("Usage: node scripts/build.mjs --bundle-content | --strip-types");
+  throw new Error("Usage: node scripts/build.mjs --bundle-content [--testing-hooks] | --strip-types [--testing-hooks]");
 }
