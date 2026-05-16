@@ -10,6 +10,7 @@ import type { ActivePresetId, DiagnosticEntry, DiagnosticStatus, PresetId, Runti
 const LOAD_NOTICE_MS = 4500;
 const LOAD_TIMEOUT_MS = 8000;
 const TOAST_MS = 2200;
+const TOAST_EXIT_MS = 180;
 const RECENT_PROMPTS_KEY = "composer.recentPromptTemplateIds";
 const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
   chatgpt: "../../assets/service-icons/chatgpt.png",
@@ -101,6 +102,7 @@ let lastContext: PageContext | null = null;
 let promptQuery = "";
 let activePromptIndex = 0;
 let toastTimer: number | undefined;
+let toastExitTimer: number | undefined;
 let composerCollapsed = true;
 let promptTemplates: PromptTemplate[] = [...PROMPT_TEMPLATES];
 let draggedServiceId: ActivePresetId | null = null;
@@ -364,24 +366,23 @@ async function toggleContextPopover(): Promise<void> {
   setComposerExpanded(true);
   contextButton.setAttribute("aria-expanded", "true");
   contextPopover.hidden = false;
+  contextPopover.dataset.open = "true";
   syncDismissLayer();
   lastContext = await collectPageContext();
   renderContextActions(lastContext);
 }
 
 function closeContextPopover(): void {
+  delete contextPopover.dataset.open;
   contextPopover.hidden = true;
   contextButton.setAttribute("aria-expanded", "false");
   syncDismissLayer();
 }
 
 function closeComposerMenus(): void {
-  contextPopover.hidden = true;
-  contextButton.setAttribute("aria-expanded", "false");
-  promptPalette.hidden = true;
-  promptButton.setAttribute("aria-expanded", "false");
+  closeContextPopover();
+  closePromptPalette();
   setComposerExpanded(false);
-  syncDismissLayer();
 }
 
 function syncDismissLayer(): void {
@@ -431,6 +432,7 @@ function openPromptPalette(): void {
   setComposerExpanded(true);
   promptButton.setAttribute("aria-expanded", "true");
   promptPalette.hidden = false;
+  promptPalette.dataset.open = "true";
   syncDismissLayer();
   promptQuery = promptSearchInput.value;
   activePromptIndex = 0;
@@ -440,6 +442,7 @@ function openPromptPalette(): void {
 }
 
 function closePromptPalette(): void {
+  delete promptPalette.dataset.open;
   promptPalette.hidden = true;
   promptButton.setAttribute("aria-expanded", "false");
   syncDismissLayer();
@@ -664,13 +667,22 @@ function showToast(message: string): void {
   if (toastTimer !== undefined) {
     window.clearTimeout(toastTimer);
   }
+  if (toastExitTimer !== undefined) {
+    window.clearTimeout(toastExitTimer);
+  }
 
   composerToast.textContent = message;
   composerToast.hidden = false;
+  composerToast.dataset.state = "entering";
   toastTimer = window.setTimeout(() => {
-    composerToast.hidden = true;
-    toastTimer = undefined;
-  }, TOAST_MS);
+    composerToast.dataset.state = "exiting";
+    toastExitTimer = window.setTimeout(() => {
+      composerToast.hidden = true;
+      delete composerToast.dataset.state;
+      toastTimer = undefined;
+      toastExitTimer = undefined;
+    }, TOAST_EXIT_MS);
+  }, TOAST_MS - TOAST_EXIT_MS);
 }
 
 async function loadConfiguredTarget(): Promise<void> {
