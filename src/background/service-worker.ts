@@ -127,11 +127,20 @@ chrome.runtime.onConnect.addListener((port) => {
     }
 
     const senderUrl = port.sender?.url || "";
-    const url = message.url || senderUrl;
+    if (!senderUrl) {
+      try { port.disconnect(); } catch {}
+      return;
+    }
+    const service = detectAIService(senderUrl);
+    if (service === "unknown") {
+      try { port.disconnect(); } catch {}
+      return;
+    }
+
     record = {
       port,
-      service: message.service || detectAIService(url),
-      url,
+      service,
+      url: senderUrl,
       senderUrl,
       tabId: port.sender?.tab?.id,
       windowId: port.sender?.tab?.windowId,
@@ -187,6 +196,10 @@ async function createContextMenus(): Promise<void> {
 }
 
 async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runtime.MessageSender): Promise<RuntimeResponse> {
+  if (!isFromExtensionPage(sender)) {
+    return { ok: false, error: "Forbidden." };
+  }
+
   await ensureInitialized();
 
   switch (message?.type) {
@@ -230,6 +243,9 @@ async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runt
     }
 
     case Messages.OPEN_FALLBACK_WINDOW: {
+      if (!isAllowedFallbackUrl(message.url)) {
+        return { ok: false, error: "Invalid URL." };
+      }
       const windowId = await openFallbackWindow(message.url, sender.tab?.windowId);
       return { ok: true, windowId };
     }
@@ -241,6 +257,27 @@ async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runt
 
     default:
       return { ok: false, error: "Unsupported message." };
+  }
+}
+
+function isFromExtensionPage(sender: chrome.runtime.MessageSender): boolean {
+  if (sender.id !== chrome.runtime.id) return false;
+  if (sender.tab) return false;
+  const url = sender.url || "";
+  return url.startsWith(chrome.runtime.getURL(""));
+}
+
+function isAllowedFallbackUrl(url: unknown): url is string {
+  if (typeof url !== "string" || !url) return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "https:") return true;
+    if (parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
   }
 }
 
@@ -637,7 +674,13 @@ export const __testing = {
   selectAiInputAgent,
   setDnrEnabled,
   startDnrDiagnosticSession,
-  endDnrDiagnosticSession
+  endDnrDiagnosticSession,
+  isFromExtensionPage,
+  isAllowedFallbackUrl,
+  handleRuntimeMessage,
+  getRegisteredAgents(): AiAgentRecord[] {
+    return [...aiInputAgents];
+  }
 };
 
 async function copyText(text: string, tab?: chrome.tabs.Tab): Promise<void> {

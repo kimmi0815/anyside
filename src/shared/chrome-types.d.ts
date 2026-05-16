@@ -7,6 +7,7 @@ type ChromeEvent<T extends (...args: any[]) => any> = {
 declare namespace chrome {
   namespace runtime {
     type MessageSender = {
+      id?: string;
       tab?: tabs.Tab;
       frameId?: number;
       url?: string;
@@ -18,8 +19,10 @@ declare namespace chrome {
       onDisconnect: ChromeEvent<(port: Port) => void>;
       onMessage: ChromeEvent<(message: any, port: Port) => void>;
       postMessage(message: any): void;
+      disconnect(): void;
     };
 
+    const id: string;
     const onInstalled: ChromeEvent<() => void>;
     const onStartup: ChromeEvent<() => void>;
     const onMessage: ChromeEvent<(message: any, sender: MessageSender, sendResponse: (response?: any) => void) => boolean | void>;
