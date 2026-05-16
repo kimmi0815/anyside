@@ -61,3 +61,13 @@ test("dictionary interpolates parameters", () => {
   assert.equal(t("en", "side.openService", { label: "ChatGPT" }), "Open ChatGPT");
   assert.equal(t("ja", "side.openService", { label: "ChatGPT" }), "ChatGPTを開く");
 });
+
+test("support options copy localizes donation and contact text", () => {
+  assert.equal(t("en", "options.supportTitle"), "Support anyside");
+  assert.match(t("en", "options.supportCopy"), /coffee-sized contribution/);
+  assert.equal(t("en", "options.supportContact"), "Send feedback / support");
+
+  assert.equal(t("ja", "options.supportTitle"), "anysideを応援");
+  assert.match(t("ja", "options.supportCopy"), /コーヒー1杯分の応援/);
+  assert.equal(t("ja", "options.supportContact"), "意見・要望・サポートを送る");
+});

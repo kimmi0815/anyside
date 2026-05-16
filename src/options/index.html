@@ -26,6 +26,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16l-7-4-7 4z" stroke-linejoin="round"/></svg>
             <span data-i18n="options.prompts">Prompts</span>
           </a>
+          <a href="#support" class="nav-item" data-target="support">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-4.4-9-9.2C1.4 8 3.7 4 7.7 4c2 0 3.4 1 4.3 2.3C12.9 5 14.3 4 16.3 4c4 0 6.3 4 4.7 7.8C19 16.6 12 21 12 21Z" stroke-linejoin="round"/></svg>
+            <span data-i18n="options.support">Support</span>
+          </a>
           <a href="#about" class="nav-item" data-target="about">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01M11 12h1v5h1" stroke-linecap="round"/></svg>
             <span data-i18n="options.about">About</span>
@@ -94,6 +98,23 @@
           <p class="hint"><span data-i18n="options.variables">Available variables:</span> <code>{{title}}</code> <code>{{url}}</code> <code>{{selection}}</code> <code>{{date}}</code> <code>{{service}}</code></p>
 
           <div id="promptTemplateList" class="card-list"></div>
+        </section>
+
+        <section id="support" class="card support-card">
+          <div class="card-head">
+            <h2 data-i18n="options.supportTitle">Support anyside</h2>
+            <p data-i18n="options.supportCopy">If anyside helps your day, a coffee-sized contribution helps keep development going. Feedback, requests, and support questions are welcome too.</p>
+          </div>
+          <div class="support-actions">
+            <a class="button primary" href="https://www.buymeacoffee.com/kimmi0815" target="_blank" rel="noopener noreferrer">
+              <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14"><path d="M5 8h12v6a5 5 0 0 1-5 5H10a5 5 0 0 1-5-5V8Z"/><path d="M17 9h1a3 3 0 0 1 0 6h-1"/><path d="M7 5h8"/></svg>
+              <span data-i18n="options.supportDonate">Buy me a coffee</span>
+            </a>
+            <a class="button" href="https://github.com/kimmi0815/anyside/issues/new?title=Feedback%20%2F%20Support%20for%20anyside&amp;body=Thanks%20for%20using%20anyside.%0A%0AWhat%20would%20you%20like%20to%20share%3F%0A%0A-%20Feedback%20%2F%20request%3A%20%0A-%20Support%20question%3A%20%0A-%20Chrome%20version%3A%20%0A-%20anyside%20version%3A%20" target="_blank" rel="noopener noreferrer">
+              <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z" stroke-linejoin="round"/></svg>
+              <span data-i18n="options.supportContact">Send feedback / support</span>
+            </a>
+          </div>
         </section>
 
         <section id="about" class="card about-card">
