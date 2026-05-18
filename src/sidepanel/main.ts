@@ -42,6 +42,7 @@ const elapsedText = element<HTMLElement>("elapsedText");
 const serviceSwitcher = element<HTMLElement>("serviceSwitcher");
 const serviceMenu = element<HTMLElement>("serviceMenu");
 const hideServiceButton = element<HTMLButtonElement>("hideServiceButton");
+const frameDeck = element<HTMLElement>("frameDeck");
 let aiFrame = element<HTMLIFrameElement>("aiFrame");
 const dismissLayer = element<HTMLButtonElement>("dismissLayer");
 const fallbackPanel = element<HTMLElement>("fallbackPanel");
@@ -73,7 +74,8 @@ const diagnosticsEnabled = isDebugMode();
 type StatusTone = "idle" | "loading" | "success" | "warning" | "error" | "diagnostic";
 type DisplayTarget = { id: ActivePresetId; label: string; url: string };
 type ServiceOption = DisplayTarget & { iconSrc?: string; isCustom: boolean };
-type LoadOptions = { activePresetId: ActivePresetId; diagnostic?: { dnrEnabled: boolean; presetId: PresetId } };
+type LoadOptions = { activePresetId: ActivePresetId; diagnostic?: { dnrEnabled: boolean; presetId: PresetId }; forceReload?: boolean };
+type PreservedFrame = { frame: HTMLIFrameElement; sourceUrl: string; loaded: boolean };
 type ActiveDiagnostic = {
   key: string;
   token: number;
@@ -107,6 +109,8 @@ let composerCollapsed = true;
 let promptTemplates: PromptTemplate[] = [...PROMPT_TEMPLATES];
 let draggedServiceId: ActivePresetId | null = null;
 let menuServiceId: ActivePresetId | null = null;
+const preservedFrames = new Map<ActivePresetId, PreservedFrame>();
+let diagnosticFrame: HTMLIFrameElement | null = null;
 
 void init();
 
@@ -745,6 +749,7 @@ async function hideService(serviceId: ActivePresetId): Promise<void> {
     return;
   }
 
+  destroyPreservedFrame(serviceId);
   if (settings.defaultPresetId === serviceId || settings.activePresetId === serviceId) {
     const fallback = visibleOptions[0];
     if (fallback) {
@@ -798,12 +803,25 @@ async function loadUrl(label: string, url: string, options: LoadOptions): Promis
   const token = ++loadToken;
   completedLoadToken = undefined;
   timedOutLoadToken = undefined;
-  const frame = replaceFrameForLoad(token, url);
+  const { frame, reused } = activateFrameForLoad(options.activePresetId, token, url, {
+    forceReload: options.forceReload || !!options.diagnostic,
+    transient: !!options.diagnostic
+  });
   const shouldReplaceFrameCompatibilitySession =
     !!activeFrameCompatibilitySessionId || shouldStartFrameCompatibilitySession(options.activePresetId, url, options);
   const frameCompatibilitySessionId = shouldReplaceFrameCompatibilitySession
     ? await replaceFrameCompatibilitySession(options.activePresetId, url, options)
     : undefined;
+
+  if (reused) {
+    clearLoadTimers();
+    completedLoadToken = token;
+    timedOutLoadToken = undefined;
+    setLoading(false);
+    setStatus(uiLanguage === "ja" ? `${label || "Service"}を復元しました。` : `${label || "Service"} restored.`, options.diagnostic ? "diagnostic" : "success");
+    return { token, frameCompatibilitySessionId };
+  }
+
   clearLoadTimers();
   setStatus(loadingStatusMessage(label, options), options.diagnostic ? "diagnostic" : "loading");
   setLoading(true);
@@ -847,7 +865,7 @@ async function showSetupState(): Promise<void> {
   setupPanel.hidden = false;
   setLoading(false);
   setStatus(tr("side.chooseService"), "idle");
-  aiFrame.src = "about:blank";
+  clearPreservedFrames();
   await endActiveFrameCompatibilitySession();
   if (settings.activePresetId !== settings.defaultPresetId) {
     settings.activePresetId = settings.defaultPresetId;
@@ -855,18 +873,136 @@ async function showSetupState(): Promise<void> {
   }
 }
 
-function replaceFrameForLoad(token: number, expectedUrl: string): HTMLIFrameElement {
-  const nextFrame = aiFrame.cloneNode(false) as HTMLIFrameElement;
+function activateFrameForLoad(
+  presetId: ActivePresetId,
+  token: number,
+  expectedUrl: string,
+  options: { forceReload: boolean; transient: boolean }
+): { frame: HTMLIFrameElement; reused: boolean } {
+  if (options.transient) {
+    const frame = createFrameForLoad(token, expectedUrl);
+    destroyDiagnosticFrame();
+    diagnosticFrame = frame;
+    showFrame(frame);
+    return { frame, reused: false };
+  }
+
+  const existing = preservedFrames.get(presetId);
+  if (existing && !options.forceReload && existing.loaded && sameFrameSource(existing.sourceUrl, expectedUrl)) {
+    destroyDiagnosticFrame();
+    showFrame(existing.frame);
+    return { frame: existing.frame, reused: true };
+  }
+
+  if (existing) {
+    destroyPreservedFrame(presetId);
+  }
+
+  const frame = createFrameForLoad(token, expectedUrl);
+  preservedFrames.set(presetId, { frame, sourceUrl: expectedUrl, loaded: false });
+  destroyDiagnosticFrame();
+  showFrame(frame);
+  return { frame, reused: false };
+}
+
+function createFrameForLoad(token: number, expectedUrl: string): HTMLIFrameElement {
+  const nextFrame = reusableInitialFrame() ?? document.createElement("iframe");
+  nextFrame.id = "";
+  nextFrame.title = "AI service";
+  nextFrame.tabIndex = 0;
+  nextFrame.referrerPolicy = "strict-origin-when-cross-origin";
   nextFrame.src = "about:blank";
+  nextFrame.hidden = true;
   nextFrame.addEventListener("load", () => {
-    completeLoad(token, expectedUrl);
+    completeLoad(token, expectedUrl, nextFrame);
   });
   nextFrame.addEventListener("error", () => {
     void handleFrameError(token);
   });
-  aiFrame.replaceWith(nextFrame);
-  aiFrame = nextFrame;
+  if (nextFrame.parentElement !== frameDeck) {
+    frameDeck.append(nextFrame);
+  }
   return nextFrame;
+}
+
+function reusableInitialFrame(): HTMLIFrameElement | undefined {
+  if (preservedFrames.size > 0 || diagnosticFrame || aiFrame.parentElement !== frameDeck) {
+    return undefined;
+  }
+
+  if ([...preservedFrames.values()].some((record) => record.frame === aiFrame) || diagnosticFrame === aiFrame) {
+    return undefined;
+  }
+
+  return aiFrame;
+}
+
+function sameFrameSource(left: string, right: string): boolean {
+  return canonicalUrl(left) === canonicalUrl(right);
+}
+
+function showFrame(frame: HTMLIFrameElement): void {
+  for (const record of preservedFrames.values()) {
+    const active = record.frame === frame;
+    record.frame.hidden = !active;
+    record.frame.id = active ? "aiFrame" : "";
+  }
+
+  if (diagnosticFrame) {
+    const active = diagnosticFrame === frame;
+    diagnosticFrame.hidden = !active;
+    diagnosticFrame.id = active ? "aiFrame" : "";
+  }
+
+  frame.hidden = false;
+  frame.id = "aiFrame";
+  aiFrame = frame;
+}
+
+function markFrameLoaded(frame: HTMLIFrameElement): void {
+  for (const record of preservedFrames.values()) {
+    if (record.frame === frame) {
+      record.loaded = true;
+      return;
+    }
+  }
+}
+
+function destroyPreservedFrame(presetId: ActivePresetId): void {
+  const record = preservedFrames.get(presetId);
+  if (!record) {
+    return;
+  }
+
+  preservedFrames.delete(presetId);
+  record.frame.remove();
+}
+
+function destroyDiagnosticFrame(): void {
+  if (!diagnosticFrame) {
+    return;
+  }
+
+  diagnosticFrame.remove();
+  diagnosticFrame = null;
+}
+
+function clearPreservedFrames(): void {
+  for (const record of preservedFrames.values()) {
+    record.frame.remove();
+  }
+  preservedFrames.clear();
+  destroyDiagnosticFrame();
+  aiFrame.remove();
+
+  const blankFrame = document.createElement("iframe");
+  blankFrame.id = "aiFrame";
+  blankFrame.title = "AI service";
+  blankFrame.tabIndex = 0;
+  blankFrame.referrerPolicy = "strict-origin-when-cross-origin";
+  blankFrame.src = "about:blank";
+  frameDeck.append(blankFrame);
+  aiFrame = blankFrame;
 }
 
 async function handleFrameError(token: number): Promise<void> {
@@ -888,12 +1024,16 @@ async function handleFrameError(token: number): Promise<void> {
   setStatus(tr("side.loadFailed", { label: currentLabel || "Service" }), "warning");
 }
 
-function completeLoad(token: number, expectedUrl: string): void {
-  if (token !== loadToken || completedLoadToken === token || expectedUrl !== currentUrl || aiFrame.src === "about:blank") {
+function completeLoad(token: number, expectedUrl: string, frame: HTMLIFrameElement): void {
+  if (frame.src !== "about:blank" && canonicalUrl(frame.src) === canonicalUrl(expectedUrl)) {
+    markFrameLoaded(frame);
+  }
+
+  if (token !== loadToken || completedLoadToken === token || expectedUrl !== currentUrl || frame !== aiFrame || frame.src === "about:blank") {
     return;
   }
 
-  if (canonicalUrl(aiFrame.src) !== canonicalUrl(expectedUrl)) {
+  if (canonicalUrl(frame.src) !== canonicalUrl(expectedUrl)) {
     return;
   }
 
@@ -937,7 +1077,7 @@ async function reloadCurrentUrl(): Promise<void> {
     setStatus(uiLanguage === "ja" ? "URLが選択されていません。" : "No URL is selected.", "warning");
     return;
   }
-  await loadUrl(currentLabel || "AI service", currentUrl, { activePresetId: settings.activePresetId });
+  await loadUrl(currentLabel || "AI service", currentUrl, { activePresetId: settings.activePresetId, forceReload: true });
 }
 
 async function openCurrentInTab(): Promise<void> {
@@ -1193,6 +1333,7 @@ async function finishDiagnostic(diagnostic: ActiveDiagnostic, status: Diagnostic
 }
 
 function syncSettingsUi(): void {
+  prunePreservedFrames();
   localizeStaticUi();
   syncSidePanelChromeUi();
   renderServiceSwitcher();
@@ -1203,6 +1344,15 @@ function syncSettingsUi(): void {
     renderContextActions(lastContext);
   }
   renderDiagnostics();
+}
+
+function prunePreservedFrames(): void {
+  const availableIds = new Set(serviceOptions({ includeHidden: true }).map((option) => option.id));
+  for (const presetId of preservedFrames.keys()) {
+    if (!availableIds.has(presetId)) {
+      destroyPreservedFrame(presetId);
+    }
+  }
 }
 
 function resolveUiLanguage(): ResolvedLanguage {

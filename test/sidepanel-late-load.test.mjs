@@ -245,6 +245,9 @@ test("side panel service switcher loads registered services and custom URLs", as
       url: "https://chatgpt.com/",
       enabled: true
     });
+    const chatgptFrame = document.getElementById("aiFrame");
+    assert.equal(chatgptFrame.src, "https://chatgpt.com/");
+    chatgptFrame.dispatch("load");
 
     const claudeButton = document
       .getElementById("serviceSwitcher")
@@ -254,6 +257,8 @@ test("side panel service switcher loads registered services and custom URLs", as
     scheduler.runByDelay(0);
 
     assert.equal(document.getElementById("aiFrame").src, "https://claude.ai/");
+    assert.notEqual(document.getElementById("aiFrame"), chatgptFrame);
+    assert.equal(chatgptFrame.hidden, true);
     assert.equal(storageData["anyside.settings"].defaultPresetId, "claude");
     assert.match(document.getElementById("statusText").textContent, /Loading Claude/);
     assert.equal(
@@ -274,7 +279,8 @@ test("side panel service switcher loads registered services and custom URLs", as
     await flushAsync();
     await flushAsync();
 
-    assert.equal(document.getElementById("aiFrame").src, "https://research.example.com/");
+    const customFrame = document.getElementById("aiFrame");
+    assert.equal(customFrame.src, "https://research.example.com/");
     assert.equal(storageData["anyside.settings"].defaultPresetId, "custom:research");
     assert.equal(
       runtimeMessages
@@ -282,14 +288,24 @@ test("side panel service switcher loads registered services and custom URLs", as
         .some((message) => message.type === "START_FRAME_COMPATIBILITY_SESSION"),
       false
     );
+    customFrame.dispatch("load");
     document.getElementById("headerReloadButton").dispatch("click");
     await flushAsync();
+    assert.notEqual(document.getElementById("aiFrame"), customFrame);
     assert.equal(document.getElementById("aiFrame").src, "https://research.example.com/");
     assert.match(document.getElementById("statusText").textContent, /Loading Research/);
 
     const chatgptButton = document
       .getElementById("serviceSwitcher")
       .children.find((child) => child.dataset.presetId === "chatgpt");
+    document.getElementById("serviceSwitcher").dispatch("click", { target: chatgptButton });
+    await flushAsync();
+
+    assert.equal(document.getElementById("aiFrame"), chatgptFrame);
+    assert.equal(chatgptFrame.hidden, false);
+    assert.equal(chatgptFrame.src, "https://chatgpt.com/");
+    assert.match(document.getElementById("statusText").textContent, /ChatGPT restored/);
+
     document.getElementById("serviceSwitcher").dispatch("dragstart", {
       target: chatgptButton,
       dataTransfer: createDataTransfer()
@@ -635,6 +651,7 @@ function createSidepanelDocument() {
     "fallbackReason",
     "fallbackNote",
     "setupPanel",
+    "frameDeck",
     "composerToast",
     "serviceSwitcher",
     "serviceMenu",
@@ -671,7 +688,7 @@ function createSidepanelDocument() {
     document.register(new FakeButtonElement(id, document));
   }
   document.register(new FakeInputElement("promptSearchInput", document));
-  document.register(new FakeIFrameElement("aiFrame", document));
+  document.getElementById("frameDeck").append(document.register(new FakeIFrameElement("aiFrame", document)));
   for (const id of [
     "statusBanner",
     "loadingSpinner",
@@ -816,7 +833,35 @@ class FakeDocument {
   }
 
   getElementById(id) {
-    return this.elements[id] ?? null;
+    if (this.elements[id]?.id === id) {
+      return this.elements[id];
+    }
+
+    const seen = new Set();
+    const visit = (element) => {
+      if (!element || seen.has(element)) {
+        return null;
+      }
+      seen.add(element);
+      if (element.id === id) {
+        return element;
+      }
+      for (const child of element.children ?? []) {
+        const found = visit(child);
+        if (found) {
+          return found;
+        }
+      }
+      return null;
+    };
+
+    for (const element of Object.values(this.elements)) {
+      const found = visit(element);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
   }
 
   createElement(tagName) {
@@ -877,10 +922,18 @@ class FakeElement {
   append(...children) {
     for (const child of children) {
       if (child && typeof child === "object") {
+        child.parentElement?.removeChild?.(child);
         child.parentElement = this;
       }
     }
     this.children.push(...children);
+  }
+
+  removeChild(child) {
+    this.children = this.children.filter((item) => item !== child);
+    if (child.parentElement === this) {
+      child.parentElement = undefined;
+    }
   }
 
   contains(target) {
@@ -927,6 +980,13 @@ class FakeElement {
   replaceWith(nextElement) {
     nextElement.id = this.id;
     this.ownerDocument.register(nextElement);
+  }
+
+  remove() {
+    this.parentElement?.removeChild(this);
+    if (this.ownerDocument.elements[this.id] === this) {
+      delete this.ownerDocument.elements[this.id];
+    }
   }
 
   setAttribute(name, value) {

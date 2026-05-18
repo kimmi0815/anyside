@@ -528,6 +528,20 @@ iframe {
   background: #ffffff;
 }
 
+.frame-deck {
+  position: absolute;
+  inset: 0;
+}
+
+.frame-deck iframe {
+  position: absolute;
+  inset: 0;
+}
+
+.frame-deck iframe[hidden] {
+  display: none;
+}
+
 .composer-toolbar {
   position: relative;
   z-index: 8;
