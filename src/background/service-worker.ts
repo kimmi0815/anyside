@@ -16,6 +16,8 @@ const LEGACY_FALLBACK_WINDOW_KEY = "aiSidecar.fallbackWindow";
 const AI_INPUT_AGENT_PORT = "ai-input-agent";
 const INSERT_TIMEOUT_MS = 3000;
 const FRAME_COMPATIBILITY_SESSION_TTL_MS = 30000;
+const MAX_PROMPT_TEXT_LENGTH = 1_000_000;
+const MAX_PAGE_CONTEXT_STRING_LENGTH = 200_000;
 
 type AiAgentRecord = {
   port: chrome.runtime.Port;
@@ -227,11 +229,21 @@ async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runt
 
   switch (message?.type) {
     case Messages.START_FRAME_COMPATIBILITY_SESSION: {
+      if (
+        typeof message.presetId !== "string" ||
+        typeof message.url !== "string" ||
+        typeof message.enabled !== "boolean"
+      ) {
+        return { ok: false, error: "Invalid message." };
+      }
       const sessionId = await startFrameCompatibilitySession(message.presetId, message.url, message.enabled);
       return { ok: true, frameCompatibilitySessionId: sessionId };
     }
 
     case Messages.END_FRAME_COMPATIBILITY_SESSION: {
+      if (typeof message.sessionId !== "string") {
+        return { ok: false, error: "Invalid message." };
+      }
       await endFrameCompatibilitySession(message.sessionId);
       return { ok: true, settings: await getSettings() };
     }
@@ -246,6 +258,12 @@ async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runt
     }
 
     case Messages.COPY_TEXT: {
+      if (typeof message.text !== "string") {
+        return { ok: false, error: "Invalid text." };
+      }
+      if (message.text.length > MAX_PROMPT_TEXT_LENGTH) {
+        return { ok: false, error: "Text is too large." };
+      }
       await copyText(message.text);
       await flashBadge(t(await getResolvedLanguage(), "common.copied"));
       return { ok: true, text: message.text };
@@ -257,6 +275,16 @@ async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runt
     }
 
     case Messages.INSERT_TEXT_TO_AI: {
+      if (
+        typeof message.text !== "string" ||
+        typeof message.service !== "string" ||
+        typeof message.url !== "string"
+      ) {
+        return { ok: false, error: "Invalid message." };
+      }
+      if (message.text.length > MAX_PROMPT_TEXT_LENGTH) {
+        return { ok: false, error: "Text is too large." };
+      }
       const insertResult = await insertTextIntoAI(message.text, message.service, message.url, sender);
       return { ok: true, insertResult, text: message.text };
     }
@@ -339,11 +367,15 @@ function normalizePageContext(value: PageContext | undefined, fallback: PageCont
   }
 
   return {
-    title: typeof value.title === "string" ? value.title : fallback.title,
-    url: typeof value.url === "string" ? value.url : fallback.url,
-    selection: typeof value.selection === "string" ? value.selection : "",
+    title: clampString(typeof value.title === "string" ? value.title : fallback.title, MAX_PAGE_CONTEXT_STRING_LENGTH),
+    url: clampString(typeof value.url === "string" ? value.url : fallback.url, MAX_PAGE_CONTEXT_STRING_LENGTH),
+    selection: clampString(typeof value.selection === "string" ? value.selection : "", MAX_PAGE_CONTEXT_STRING_LENGTH),
     timestamp: typeof value.timestamp === "number" ? value.timestamp : Date.now()
   };
+}
+
+function clampString(value: string, limit: number): string {
+  return value.length > limit ? value.slice(0, limit) : value;
 }
 
 async function insertTextIntoAI(

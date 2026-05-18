@@ -24,10 +24,13 @@ type InsertTextMessage = {
 
 type AgentMessage = InsertTextMessage;
 
+const MAX_INSERT_TEXT_LENGTH = 1_000_000;
+
 const currentUrl = new URL(window.location.href);
 const service = detectAIInputService(currentUrl);
 const adapter = createAIInputAdapter(service);
 const port = (chrome.runtime as RuntimeWithConnect).connect({ name: "ai-input-agent" });
+let disconnected = false;
 
 port.postMessage({
   type: "AI_AGENT_READY",
@@ -39,23 +42,35 @@ port.onMessage.addListener((message) => {
   void handleMessage(message);
 });
 
+port.onDisconnect?.addListener(() => {
+  disconnected = true;
+});
+
 async function handleMessage(message: unknown): Promise<void> {
-  if (!isInsertTextMessage(message)) {
+  if (disconnected || !isInsertTextMessage(message)) {
     return;
   }
 
   const requestedAdapter = message.service ? createAIInputAdapter(message.service) : adapter;
   const result = await requestedAdapter.insertText(message.text);
 
-  port.postMessage({
-    type: "INSERT_TEXT_RESULT",
-    requestId: message.requestId,
-    success: result.success,
-    reason: result.reason,
-    service: requestedAdapter.service,
-    url: window.location.href,
-    ok: result.success
-  });
+  if (disconnected) {
+    return;
+  }
+
+  try {
+    port.postMessage({
+      type: "INSERT_TEXT_RESULT",
+      requestId: message.requestId,
+      success: result.success,
+      reason: result.reason,
+      service: requestedAdapter.service,
+      url: window.location.href,
+      ok: result.success
+    });
+  } catch {
+    // The port may have been torn down (extension reload, navigation); drop the response.
+  }
 }
 
 function isInsertTextMessage(message: unknown): message is AgentMessage {
@@ -65,6 +80,7 @@ function isInsertTextMessage(message: unknown): message is AgentMessage {
     "type" in message &&
     message.type === "INSERT_TEXT" &&
     "text" in message &&
-    typeof message.text === "string"
+    typeof message.text === "string" &&
+    message.text.length <= MAX_INSERT_TEXT_LENGTH
   );
 }

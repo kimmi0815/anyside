@@ -48,6 +48,9 @@ const STATUS_RESET_MS = 2000;
 const ENTRY_STATUS_SHOW_MS = 1600;
 const FAVICON_FETCH_TIMEOUT_MS = 2500;
 const FAVICON_IMAGE_TIMEOUT_MS = 1500;
+const FAVICON_HTML_MAX_BYTES = 1_000_000;
+const FAVICON_MANIFEST_MAX_BYTES = 200_000;
+const FAVICON_MANIFEST_ICON_LIMIT = 50;
 
 let settings: Settings;
 let uiLanguage: ResolvedLanguage = "en";
@@ -921,15 +924,17 @@ async function iconCandidatesForUrl(url: string): Promise<string[]> {
   try {
     const response = await fetchWithTimeout(url, { credentials: "omit" }, FAVICON_FETCH_TIMEOUT_MS);
     if (response.ok && response.headers.get("content-type")?.includes("text/html")) {
-      const html = await response.text();
-      const doc = new DOMParser().parseFromString(html, "text/html");
-      for (const link of Array.from(doc.querySelectorAll<HTMLLinkElement>("link[rel]"))) {
-        const rel = link.rel.toLowerCase();
-        if (rel.includes("apple-touch-icon") || rel.includes("icon")) {
-          addCandidate(link.href || link.getAttribute("href"));
-        }
-        if (rel === "manifest") {
-          await addCandidateFromManifest(link.href || link.getAttribute("href"), url, addCandidate);
+      const html = await readBoundedText(response, FAVICON_HTML_MAX_BYTES);
+      if (html) {
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        for (const link of Array.from(doc.querySelectorAll<HTMLLinkElement>("link[rel]"))) {
+          const rel = link.rel.toLowerCase();
+          if (rel.includes("apple-touch-icon") || rel.includes("icon")) {
+            addCandidate(link.href || link.getAttribute("href"));
+          }
+          if (rel === "manifest") {
+            await addCandidateFromManifest(link.href || link.getAttribute("href"), url, addCandidate);
+          }
         }
       }
     }
@@ -956,18 +961,76 @@ async function addCandidateFromManifest(
     if (!response.ok) {
       return;
     }
-    const manifest = await response.json();
-    if (!manifest || !Array.isArray(manifest.icons)) {
+    const body = await readBoundedText(response, FAVICON_MANIFEST_MAX_BYTES);
+    if (!body) {
       return;
     }
-    for (const icon of manifest.icons) {
-      if (icon && typeof icon.src === "string") {
-        addCandidate(new URL(icon.src, normalizedManifestUrl).href);
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(body);
+    } catch {
+      return;
+    }
+    if (!manifest || typeof manifest !== "object" || !Array.isArray((manifest as { icons?: unknown }).icons)) {
+      return;
+    }
+    const icons = (manifest as { icons: unknown[] }).icons.slice(0, FAVICON_MANIFEST_ICON_LIMIT);
+    for (const icon of icons) {
+      if (icon && typeof icon === "object" && typeof (icon as { src?: unknown }).src === "string") {
+        try {
+          addCandidate(new URL((icon as { src: string }).src, normalizedManifestUrl).href);
+        } catch {
+          // Skip malformed icon entries.
+        }
       }
     }
   } catch {
     // Manifest discovery is opportunistic.
   }
+}
+
+async function readBoundedText(response: Response, maxBytes: number): Promise<string | null> {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    return null;
+  }
+
+  const body = response.body;
+  if (!body) {
+    const text = await response.text();
+    return text.length > maxBytes ? null : text;
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!value) {
+        continue;
+      }
+      received += value.byteLength;
+      if (received > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+
+  const merged = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(merged);
 }
 
 function normalizeIconCandidate(value: string | null | undefined, baseUrl: string): string | undefined {
