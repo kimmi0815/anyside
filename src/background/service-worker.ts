@@ -30,6 +30,8 @@ const MENU_OPEN_ID = "open-anyside";
 const LEGACY_FALLBACK_WINDOW_KEY = "aiSidecar.fallbackWindow";
 const AI_INPUT_AGENT_PORT = "ai-input-agent";
 const INSERT_TIMEOUT_MS = 3000;
+const AI_AGENT_LOOKUP_RETRY_MS = 300;
+const AI_AGENT_LOOKUP_RETRY_ATTEMPTS = 2;
 const FRAME_COMPATIBILITY_SESSION_TTL_MS = 30000;
 const MAX_PROMPT_TEXT_LENGTH = 1_000_000;
 const MAX_PAGE_CONTEXT_STRING_LENGTH = 200_000;
@@ -604,7 +606,7 @@ async function insertTextIntoAI(
   sender?: chrome.runtime.MessageSender
 ): Promise<InsertResult> {
   const language = await getResolvedLanguage();
-  const selection = await findAiInputAgent({
+  const selection = await findAiInputAgentWithRetry({
     service,
     url,
     senderUrl: sender?.url,
@@ -659,6 +661,15 @@ async function findAiInputAgent(target: AiAgentTarget): Promise<AiAgentSelection
   });
 }
 
+async function findAiInputAgentWithRetry(target: AiAgentTarget): Promise<AiAgentSelection> {
+  let selection = await findAiInputAgent(target);
+  for (let attempt = 0; attempt < AI_AGENT_LOOKUP_RETRY_ATTEMPTS && selection.status === "unavailable"; attempt += 1) {
+    await delay(AI_AGENT_LOOKUP_RETRY_MS);
+    selection = await findAiInputAgent(target);
+  }
+  return selection;
+}
+
 function selectAiInputAgent(agents: AiAgentRecord[], target: AiAgentTarget): AiAgentSelection {
   if (target.service === "unknown" || !isValidUrl(target.url)) {
     return { status: "unavailable" };
@@ -707,6 +718,10 @@ function selectAiInputAgent(agents: AiAgentRecord[], target: AiAgentTarget): AiA
   }
 
   return { status: "ambiguous" };
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function uniqueAgent(agents: AiAgentRecord[]): AiAgentSelection {

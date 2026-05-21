@@ -836,8 +836,7 @@ iframe {
 }
 
 .composer-secondary-actions button,
-.shelf-row-actions button,
-.template-variable-list button {
+.shelf-row-actions button {
   min-height: 30px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -853,9 +852,7 @@ iframe {
 .composer-secondary-actions button:hover,
 .composer-secondary-actions button:focus-visible,
 .shelf-row-actions button:hover,
-.shelf-row-actions button:focus-visible,
-.template-variable-list button:hover,
-.template-variable-list button:focus-visible {
+.shelf-row-actions button:focus-visible {
   border-color: var(--line-strong);
   background: var(--surface-subtle);
 }
@@ -1042,19 +1039,6 @@ iframe {
   color: var(--text);
   font-size: 13px;
   line-height: 1.45;
-}
-
-.template-variable-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 8px;
-}
-
-.template-variable-list button {
-  min-height: 28px;
-  padding-inline: 8px;
-  color: var(--accent);
 }
 
 .draft-target-row {

@@ -6,7 +6,19 @@ import { PENDING_CONTEXT_SHELF_ITEMS_KEY } from "../dist/shared/contextShelfSess
 test("side panel hides fallback when the iframe loads after the normal timeout", async () => {
   const scheduler = createScheduler();
   const document = createSidepanelDocument();
-  const storageData = {};
+  const storageData = {
+    "composer.promptTemplates": [
+      {
+        id: "custom:verification",
+        title: "Verification Prompt",
+        category: "Test",
+        body: "Review this",
+        favorite: false,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ]
+  };
 
   globalThis.HTMLElement = FakeElement;
   globalThis.Element = FakeElement;
@@ -378,6 +390,8 @@ test("side panel composer menus close from toggles and the dismiss layer", async
     const composerActions = document.getElementById("composerActions");
     const promptPalette = document.getElementById("promptPalette");
     const contextPopover = document.getElementById("contextPopover");
+    const contextShelfPanel = document.getElementById("contextShelfPanel");
+    const promptDraftPanel = document.getElementById("promptDraftPanel");
     const dismissLayer = document.getElementById("dismissLayer");
 
     assert.equal(toolbar.dataset.expanded, "false");
@@ -415,6 +429,20 @@ test("side panel composer menus close from toggles and the dismiss layer", async
     assert.equal(promptPalette.hidden, true);
     assert.equal(toolbar.dataset.expanded, "false");
     assert.equal(dismissLayer.hidden, true);
+
+    document.getElementById("shelfButton").dispatch("click");
+    assert.equal(contextShelfPanel.hidden, false);
+    document.getElementById("promptButton").dispatch("click");
+    assert.equal(contextShelfPanel.hidden, true);
+    assert.equal(promptPalette.hidden, false);
+
+    document.getElementById("shelfButton").dispatch("click");
+    assert.equal(contextShelfPanel.hidden, false);
+    document.getElementById("contextButton").dispatch("click");
+    await flushAsync();
+    assert.equal(contextShelfPanel.hidden, true);
+    assert.equal(contextPopover.hidden, false);
+
   } finally {
     delete globalThis.chrome;
     delete globalThis.document;
@@ -688,6 +716,11 @@ test("side panel opens saved prompts as temporary editable drafts from Prompt", 
     assert.equal(document.getElementById("promptDraftPanel").hidden, false);
     assert.equal(document.getElementById("promptDraftTextarea").value, "Review {{title}}");
     assert.equal(runtimeMessages.some((message) => message.type === "INSERT_TEXT_TO_AI"), false);
+
+    document.getElementById("contextButton").dispatch("click");
+    await flushAsync();
+    assert.equal(document.getElementById("promptDraftPanel").hidden, true);
+    assert.equal(document.getElementById("contextPopover").hidden, false);
   } finally {
     delete globalThis.chrome;
     delete globalThis.document;
@@ -764,6 +797,7 @@ test("side panel drains context-menu Shelf selections and copies all Shelf mater
     assert.equal(document.getElementById("contextShelfPanel").hidden, false);
     assert.equal(document.getElementById("copyShelfButton").disabled, false);
     assert.match(textTree(document.getElementById("contextShelfList")), /Selected body text/);
+    assert.equal(findByDataset(document.getElementById("contextShelfList"), "shelfAction", "draft"), null);
 
     document.getElementById("copyShelfButton").dispatch("click");
     await flushAsync();
@@ -922,7 +956,6 @@ function createSidepanelDocument() {
     "contextShelfList",
     "promptDraftPanel",
     "promptDraftTitle",
-    "templateVariableList",
     "diagnosticsDetails",
     "diagnosticsTable"
   ];
@@ -936,7 +969,6 @@ function createSidepanelDocument() {
     "contextButton",
     "promptButton",
     "addContextToShelfButton",
-    "sendContextToDraftButton",
     "shelfButton",
     "copyShelfButton",
     "clearShelfButton",
@@ -1223,9 +1255,6 @@ class FakeElement {
       return this;
     }
     if (selector === "button[data-shelf-action][data-shelf-id]" && this instanceof FakeButtonElement && this.dataset.shelfAction && this.dataset.shelfId) {
-      return this;
-    }
-    if (selector === "button[data-template-var]" && this instanceof FakeButtonElement && this.dataset.templateVar) {
       return this;
     }
     if (selector === "button[data-template-draft-id]" && this instanceof FakeButtonElement && this.dataset.templateDraftId) {

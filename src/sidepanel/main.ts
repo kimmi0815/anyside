@@ -34,8 +34,6 @@ const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
   manus: "../../assets/service-icons/manus.png",
   genspark: "../../assets/service-icons/genspark.png"
 };
-const TEMPLATE_VARIABLE_KEYS = ["title", "url", "selection", "date", "service", "draft", "domain", "headings", "pageText"] as const;
-
 const app = element<HTMLElement>("app");
 const statusLive = element<HTMLElement>("statusLive");
 const statusBanner = element<HTMLElement>("statusBanner");
@@ -76,7 +74,6 @@ const promptPalette = element<HTMLElement>("promptPalette");
 const promptSearchInput = element<HTMLInputElement>("promptSearchInput");
 const promptList = element<HTMLElement>("promptList");
 const addContextToShelfButton = element<HTMLButtonElement>("addContextToShelfButton");
-const sendContextToDraftButton = element<HTMLButtonElement>("sendContextToDraftButton");
 const shelfButton = element<HTMLButtonElement>("shelfButton");
 const contextShelfPanel = element<HTMLElement>("contextShelfPanel");
 const contextShelfTitle = element<HTMLElement>("contextShelfTitle");
@@ -86,7 +83,6 @@ const clearShelfButton = element<HTMLButtonElement>("clearShelfButton");
 const promptDraftPanel = element<HTMLElement>("promptDraftPanel");
 const promptDraftTitle = element<HTMLElement>("promptDraftTitle");
 const promptDraftTextarea = element<HTMLTextAreaElement>("promptDraftTextarea");
-const templateVariableList = element<HTMLElement>("templateVariableList");
 const draftTargetSelect = element<HTMLSelectElement>("draftTargetSelect");
 const tryDraftButton = element<HTMLButtonElement>("tryDraftButton");
 const insertDraftButton = element<HTMLButtonElement>("insertDraftButton");
@@ -108,7 +104,6 @@ type ContextShelfItem = {
   text: string;
   createdAt: number;
 };
-type TemplateVariableKey = typeof TEMPLATE_VARIABLE_KEYS[number];
 type ActiveDiagnostic = {
   key: string;
   token: number;
@@ -313,7 +308,11 @@ function bindEvents(): void {
 function bindComposerEvents(): void {
   composerLauncherButton.addEventListener("click", (event) => {
     event.stopPropagation();
-    setComposerExpanded(composerCollapsed);
+    if (!composerCollapsed) {
+      closeComposerMenus();
+      return;
+    }
+    setComposerExpanded(true);
   });
   contextButton.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -329,10 +328,6 @@ function bindComposerEvents(): void {
   addContextToShelfButton.addEventListener("click", () => {
     void handleAddCurrentContextToShelf();
   });
-  sendContextToDraftButton.addEventListener("click", () => {
-    void handleSendCurrentContextToDraft();
-  });
-
   promptButton.addEventListener("click", (event) => {
     event.stopPropagation();
     if (!promptPalette.hidden) {
@@ -381,13 +376,6 @@ function bindComposerEvents(): void {
   });
   clearShelfButton.addEventListener("click", () => clearContextShelf());
   promptDraftTextarea.addEventListener("input", () => savePromptDraft(promptDraftTextarea.value));
-  templateVariableList.addEventListener("click", (event) => {
-    const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-template-var]") : null;
-    if (!target) {
-      return;
-    }
-    insertTemplateVariable(target.dataset.templateVar as TemplateVariableKey);
-  });
   draftTargetSelect.addEventListener("change", () => {
     savePromptDraftTarget(draftTargetSelect.value);
   });
@@ -475,6 +463,8 @@ async function toggleContextPopover(): Promise<void> {
   }
 
   closePromptPalette();
+  closeContextShelfPanel();
+  closePromptDraftPanel();
   setComposerExpanded(true);
   contextButton.setAttribute("aria-expanded", "true");
   contextPopover.hidden = false;
@@ -550,6 +540,8 @@ async function handleContextAction(mode: ContextMode): Promise<void> {
 
 function openPromptPalette(): void {
   closeContextPopover();
+  closeContextShelfPanel();
+  closePromptDraftPanel();
   setComposerExpanded(true);
   promptButton.setAttribute("aria-expanded", "true");
   promptPalette.hidden = false;
@@ -596,7 +588,6 @@ function openPromptDraftPanel(): void {
   promptDraftPanel.hidden = false;
   promptDraftPanel.dataset.open = "true";
   renderDraftTargetOptions();
-  renderTemplateVariableList();
   syncDismissLayer();
   window.setTimeout(() => promptDraftTextarea.focus(), 0);
 }
@@ -791,6 +782,7 @@ async function enrichPageContextWithPageText(context: PageContext): Promise<Page
     url: extracted.url || context.url,
     domain: extracted.domain || context.domain,
     headings: extracted.headings,
+    selection: extracted.selection || context.selection,
     pageText: extracted.pageText,
     pageTextSource: source,
     pageTextTruncated: Boolean(extracted.truncated?.pageText),
@@ -903,21 +895,6 @@ async function handleAddCurrentContextToShelf(): Promise<void> {
   showToast(tr("side.shelfAdded"));
 }
 
-async function handleSendCurrentContextToDraft(): Promise<void> {
-  const context = await collectPageContext({ includePageText: true });
-  lastContext = context;
-  const text = formatShelfText(createContextShelfItems(context));
-  if (!text) {
-    showToast(tr("side.contextUnavailable"));
-    return;
-  }
-
-  setPromptDraft(text);
-  closeContextPopover();
-  openPromptDraftPanel();
-  showToast(tr("side.shelfSentToDraft"));
-}
-
 function createContextShelfItems(context: PageContext): ContextShelfItem[] {
   const items: ContextShelfItem[] = [];
   const titleUrl = renderContextTemplate(context, "title_url", uiLanguage);
@@ -993,8 +970,7 @@ function renderContextShelf(): void {
   const globalActions = document.createElement("div");
   globalActions.className = "composer-secondary-actions";
   globalActions.append(
-    shelfActionButton("all", "insert", tr("side.shelfInsert")),
-    shelfActionButton("all", "draft", tr("side.shelfToDraft"))
+    shelfActionButton("all", "insert", tr("side.shelfInsert"))
   );
   contextShelfList.append(globalActions);
 
@@ -1019,14 +995,13 @@ function renderContextShelf(): void {
     preview.className = "shelf-row-preview";
     preview.textContent = item.text;
 
-    const actions = document.createElement("div");
-    actions.className = "shelf-row-actions";
-    actions.append(
-      shelfActionButton(item.id, "insert", uiText("Insert", "挿入")),
-      shelfActionButton(item.id, "draft", uiText("Draft", "Draft")),
-      shelfActionButton(item.id, "copy", uiText("Copy", "コピー")),
-      shelfActionButton(item.id, "delete", uiText("Delete", "削除"))
-    );
+  const actions = document.createElement("div");
+  actions.className = "shelf-row-actions";
+  actions.append(
+    shelfActionButton(item.id, "insert", uiText("Insert", "挿入")),
+    shelfActionButton(item.id, "copy", uiText("Copy", "コピー")),
+    shelfActionButton(item.id, "delete", uiText("Delete", "削除"))
+  );
 
     row.append(header, preview, actions);
     contextShelfList.append(row);
@@ -1057,11 +1032,6 @@ async function handleShelfAction(action: string, itemId: string): Promise<void> 
       setComposerExpanded(false);
       break;
     }
-    case "draft":
-      setPromptDraft(text);
-      openPromptDraftPanel();
-      showToast(tr("side.shelfSentToDraft"));
-      break;
     case "copy": {
       const copied = await copyTextFromSidePanel(text);
       showToast(copied ? tr("side.shelfCopied") : tr("side.copyFailed"));
@@ -1234,30 +1204,6 @@ async function renderPromptDraftForService(service: AIService): Promise<{ text: 
   };
 }
 
-function renderTemplateVariableList(): void {
-  templateVariableList.textContent = "";
-  for (const key of TEMPLATE_VARIABLE_KEYS) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.templateVar = key;
-    button.title = `{{${key}}}`;
-    button.textContent = templateVariableLabel(key);
-    templateVariableList.append(button);
-  }
-}
-
-function insertTemplateVariable(key: TemplateVariableKey): void {
-  const token = `{{${key}}}`;
-  const start = promptDraftTextarea.selectionStart;
-  const end = promptDraftTextarea.selectionEnd;
-  const current = promptDraftTextarea.value;
-  const next = `${current.slice(0, start)}${token}${current.slice(end)}`;
-  setPromptDraft(next);
-  promptDraftTextarea.focus();
-  const cursor = start + token.length;
-  promptDraftTextarea.setSelectionRange(cursor, cursor);
-}
-
 function renderDraftTargetOptions(): void {
   const options = serviceOptions();
   const preferred = draftTargetSelect.value || readPromptDraftTarget();
@@ -1385,29 +1331,6 @@ function promptBodyNeedsExtractedPageText(body: string): boolean {
 
 function promptBodyNeedsPageTextValue(body: string): boolean {
   return /\{\{pageText\}\}/.test(body);
-}
-
-function templateVariableLabel(key: TemplateVariableKey): string {
-  switch (key) {
-    case "title":
-      return uiText("Title", "タイトル");
-    case "url":
-      return "URL";
-    case "selection":
-      return uiText("Selection", "選択範囲");
-    case "date":
-      return uiText("Date", "日付");
-    case "service":
-      return uiText("Service", "サービス");
-    case "draft":
-      return "Draft";
-    case "domain":
-      return uiText("Domain", "ドメイン");
-    case "headings":
-      return uiText("Headings", "見出し");
-    case "pageText":
-      return uiText("Page Body", "本文");
-  }
 }
 
 function contextShelfSubtitle(context: PageContext): string {
@@ -2137,7 +2060,6 @@ function syncSettingsUi(): void {
     renderContextActions(lastContext);
   }
   renderContextShelf();
-  renderTemplateVariableList();
   renderDraftTargetOptions();
   renderDiagnostics();
 }
@@ -2194,7 +2116,6 @@ function localizeStaticUi(): void {
   const shelfLabel = typeof shelfButton.querySelector === "function" ? shelfButton.querySelector(".composer-button-label") : null;
   if (shelfLabel) shelfLabel.textContent = uiText("Shelf", "Shelf");
   addContextToShelfButton.textContent = uiText("Add to Shelf", "Shelfに追加");
-  sendContextToDraftButton.textContent = uiText("Send to Draft", "Draftへ送る");
   contextShelfPanel.setAttribute("aria-label", "Context Shelf");
   contextShelfTitle.textContent = "Context Shelf";
   copyShelfButton.textContent = tr("side.shelfCopyAll");
@@ -2202,7 +2123,6 @@ function localizeStaticUi(): void {
   promptDraftPanel.setAttribute("aria-label", "Prompt Draft");
   promptDraftTitle.textContent = "Prompt Draft";
   promptDraftTextarea.placeholder = uiText("Draft a prompt...", "Promptを下書き...");
-  templateVariableList.setAttribute("aria-label", uiText("Template variables", "テンプレート変数"));
   draftTargetSelect.setAttribute("aria-label", uiText("Try in another AI", "別のAIで試す"));
   tryDraftButton.textContent = uiText("Try", "試す");
   insertDraftButton.textContent = uiText("Insert", "挿入");

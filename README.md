@@ -67,8 +67,8 @@ The composer adds optional context tools without changing the existing one-click
 
 - Context actions still insert URL, title + URL, selected text, page context, page questions, and page summaries as before. The new body-aware actions are appended after those existing actions.
 - Body-aware actions fetch active-tab page text only after the user explicitly chooses them. They include extracted body text, headings, and domain, and never change the original Summarize this page action.
-- Context Shelf temporarily keeps title + URL, selected text, and extracted page body context for the current browser session. Selection text can also be added from the page context menu. Shelf items can be inserted into the current AI, sent to Draft, copied one by one or all together, removed one by one, or cleared together.
-- Prompt Draft is an editable textarea opened from Prompt when you want to temporarily adjust a saved prompt before using it, or from explicit "send to Draft" actions. Draft text can be inserted into the current AI, copied, cleared, or tried in another selected AI. anyside attempts insertion and falls back to copy; it never auto-submits.
+- Context Shelf temporarily keeps title + URL, selected text, and extracted page body context for the current browser session. Selection text can also be added from the page context menu. Shelf items can be inserted into the current AI, copied one by one or all together, removed one by one, or cleared together.
+- Prompt Draft is an editable textarea opened from Prompt when you want to temporarily adjust a saved prompt before using it. Draft text can be inserted into the current AI, copied, cleared, or tried in another selected AI. anyside attempts insertion and falls back to copy; it never auto-submits.
 - Prompt templates support `{{title}}`, `{{url}}`, `{{selection}}`, `{{date}}`, `{{service}}`, `{{draft}}`, `{{domain}}`, `{{headings}}`, and `{{pageText}}`. `{{draft}}` expands to the current Prompt Draft text. Templates that include `{{domain}}`, `{{headings}}`, or `{{pageText}}` trigger active-tab extraction only when the user selects that template.
 
 ## Developer diagnostics
