@@ -34,6 +34,13 @@ export type PageContext = {
   url: string;
   selection: string;
   timestamp: number;
+  domain?: string;
+  headings?: string[];
+  pageText?: string;
+  draft?: string;
+  pageTextSource?: "article" | "main" | "body" | "document" | "fallback";
+  pageTextTruncated?: boolean;
+  pageTextLimit?: number;
 };
 
 export type ContextMode =
@@ -42,7 +49,9 @@ export type ContextMode =
   | "selection"
   | "full_context"
   | "ask_about_page"
-  | "summarize_page";
+  | "summarize_page"
+  | "page_text"
+  | "summarize_page_with_text";
 
 export type PromptTemplate = {
   id: string;

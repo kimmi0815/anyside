@@ -71,3 +71,22 @@ test("support options copy localizes donation and contact text", () => {
   assert.match(t("ja", "options.supportCopy"), /コーヒー1杯分の応援/);
   assert.equal(t("ja", "options.supportContact"), "意見・要望・サポートを送る");
 });
+
+test("new shelf, draft, and page text labels are localized in English and Japanese", () => {
+  assert.equal(t("en", "side.contextShelf"), "Context Shelf");
+  assert.equal(t("ja", "side.contextShelf"), "Context Shelf");
+  assert.equal(t("en", "side.promptDraft"), "Prompt Draft");
+  assert.equal(t("ja", "side.promptDraft"), "Prompt Draft");
+  assert.equal(t("en", "side.shelfInsert"), "Insert Shelf");
+  assert.equal(t("ja", "side.shelfInsert"), "Shelfを挿入");
+  assert.equal(t("en", "side.shelfCopyAll"), "Copy all");
+  assert.equal(t("ja", "side.shelfCopyAll"), "すべてコピー");
+  assert.equal(t("en", "side.draftInsert"), "Insert Draft");
+  assert.equal(t("ja", "side.draftInsert"), "Draftを挿入");
+  assert.equal(t("en", "context.action.page_text"), "Insert page text");
+  assert.equal(t("ja", "context.action.page_text"), "本文を挿入");
+  assert.equal(t("en", "context.label.pageText"), "Page text:");
+  assert.equal(t("ja", "context.label.pageText"), "本文:");
+  assert.equal(t("en", "background.menuAddSelectionToShelf"), "Add selection to Context Shelf");
+  assert.equal(t("ja", "background.menuAddSelectionToShelf"), "選択テキストをContext Shelfに追加");
+});

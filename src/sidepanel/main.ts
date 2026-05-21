@@ -4,6 +4,7 @@ import { BUILT_IN_PRESETS, FRAME_COMPATIBILITY_DOMAINS, diagnosticKey, isBuiltIn
 import { getSettings, normalizeSettings, saveSettings, SETTINGS_KEY } from "../shared/storage.js";
 import { CUSTOM_PROMPT_TEMPLATES_KEY, getCustomPromptTemplates } from "../storage/promptTemplateStorage.js";
 import { resolveLanguage, t, type ResolvedLanguage } from "../shared/i18n.js";
+import { PENDING_CONTEXT_SHELF_ITEMS_KEY, normalizePendingContextShelfItems } from "../shared/contextShelfSession.js";
 import type { AIService, ContextMode, PageContext, PromptTemplate } from "../features/composer/types.js";
 import type { ActivePresetId, DiagnosticEntry, DiagnosticStatus, PresetId, RuntimeMessage, RuntimeResponse, Settings } from "../shared/types.js";
 
@@ -12,6 +13,11 @@ const LOAD_TIMEOUT_MS = 8000;
 const TOAST_MS = 2200;
 const TOAST_EXIT_MS = 180;
 const RECENT_PROMPTS_KEY = "composer.recentPromptTemplateIds";
+const CONTEXT_SHELF_KEY = "composer.contextShelfItems";
+const PROMPT_DRAFT_KEY = "composer.promptDraft";
+const PROMPT_DRAFT_TARGET_KEY = "composer.promptDraftTarget";
+const CONTEXT_SHELF_LIMIT = 20;
+const DRAFT_TRY_LOAD_WAIT_MS = 2600;
 const AI_FRAME_ALLOW = "clipboard-write";
 const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
   chatgpt: "../../assets/service-icons/chatgpt.png",
@@ -28,6 +34,7 @@ const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
   manus: "../../assets/service-icons/manus.png",
   genspark: "../../assets/service-icons/genspark.png"
 };
+const TEMPLATE_VARIABLE_KEYS = ["title", "url", "selection", "date", "service", "draft", "domain", "headings", "pageText"] as const;
 
 const app = element<HTMLElement>("app");
 const statusLive = element<HTMLElement>("statusLive");
@@ -68,6 +75,24 @@ const contextActions = element<HTMLElement>("contextActions");
 const promptPalette = element<HTMLElement>("promptPalette");
 const promptSearchInput = element<HTMLInputElement>("promptSearchInput");
 const promptList = element<HTMLElement>("promptList");
+const addContextToShelfButton = element<HTMLButtonElement>("addContextToShelfButton");
+const sendContextToDraftButton = element<HTMLButtonElement>("sendContextToDraftButton");
+const shelfButton = element<HTMLButtonElement>("shelfButton");
+const draftButton = element<HTMLButtonElement>("draftButton");
+const contextShelfPanel = element<HTMLElement>("contextShelfPanel");
+const contextShelfTitle = element<HTMLElement>("contextShelfTitle");
+const contextShelfList = element<HTMLElement>("contextShelfList");
+const copyShelfButton = element<HTMLButtonElement>("copyShelfButton");
+const clearShelfButton = element<HTMLButtonElement>("clearShelfButton");
+const promptDraftPanel = element<HTMLElement>("promptDraftPanel");
+const promptDraftTitle = element<HTMLElement>("promptDraftTitle");
+const promptDraftTextarea = element<HTMLTextAreaElement>("promptDraftTextarea");
+const templateVariableList = element<HTMLElement>("templateVariableList");
+const draftTargetSelect = element<HTMLSelectElement>("draftTargetSelect");
+const tryDraftButton = element<HTMLButtonElement>("tryDraftButton");
+const insertDraftButton = element<HTMLButtonElement>("insertDraftButton");
+const copyDraftButton = element<HTMLButtonElement>("copyDraftButton");
+const clearDraftButton = element<HTMLButtonElement>("clearDraftButton");
 const diagnosticsDetails = element<HTMLDetailsElement>("diagnosticsDetails");
 const diagnosticsTable = element<HTMLTableSectionElement>("diagnosticsTable");
 const diagnosticsEnabled = isDebugMode();
@@ -77,6 +102,14 @@ type DisplayTarget = { id: ActivePresetId; label: string; url: string };
 type ServiceOption = DisplayTarget & { iconSrc?: string; isCustom: boolean };
 type LoadOptions = { activePresetId: ActivePresetId; diagnostic?: { dnrEnabled: boolean; presetId: PresetId }; forceReload?: boolean };
 type PreservedFrame = { frame: HTMLIFrameElement; sourceUrl: string; loaded: boolean };
+type ContextShelfItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  text: string;
+  createdAt: number;
+};
+type TemplateVariableKey = typeof TEMPLATE_VARIABLE_KEYS[number];
 type ActiveDiagnostic = {
   key: string;
   token: number;
@@ -110,6 +143,7 @@ let composerCollapsed = true;
 let promptTemplates: PromptTemplate[] = [...PROMPT_TEMPLATES];
 let draggedServiceId: ActivePresetId | null = null;
 let menuServiceId: ActivePresetId | null = null;
+let contextShelfItems: ContextShelfItem[] = [];
 const preservedFrames = new Map<ActivePresetId, PreservedFrame>();
 let diagnosticFrame: HTMLIFrameElement | null = null;
 
@@ -119,9 +153,12 @@ async function init(): Promise<void> {
   diagnosticsDetails.hidden = !diagnosticsEnabled;
   settings = await getSettings();
   uiLanguage = resolveUiLanguage();
+  contextShelfItems = readContextShelfItems();
+  promptDraftTextarea.value = readPromptDraft();
   await loadPromptTemplates();
   syncSettingsUi();
   bindEvents();
+  await drainPendingContextShelfItems();
 
   await loadConfiguredTarget();
 }
@@ -200,6 +237,13 @@ function bindEvents(): void {
   bindComposerEvents();
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "session") {
+      if (changes[PENDING_CONTEXT_SHELF_ITEMS_KEY]?.newValue) {
+        void drainPendingContextShelfItems();
+      }
+      return;
+    }
+
     if (areaName !== "local") {
       return;
     }
@@ -283,6 +327,12 @@ function bindComposerEvents(): void {
     }
     void handleContextAction(target.dataset.mode as ContextMode);
   });
+  addContextToShelfButton.addEventListener("click", () => {
+    void handleAddCurrentContextToShelf();
+  });
+  sendContextToDraftButton.addEventListener("click", () => {
+    void handleSendCurrentContextToDraft();
+  });
 
   promptButton.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -305,22 +355,81 @@ function bindComposerEvents(): void {
     }
     void handlePromptSelection(target.dataset.templateId || "");
   });
+  shelfButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!contextShelfPanel.hidden) {
+      closeComposerMenus();
+      return;
+    }
+    openContextShelfPanel();
+  });
+  draftButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!promptDraftPanel.hidden) {
+      closeComposerMenus();
+      return;
+    }
+    openPromptDraftPanel();
+  });
+  contextShelfList.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-shelf-action][data-shelf-id]") : null;
+    if (!target) {
+      return;
+    }
+    void handleShelfAction(target.dataset.shelfAction || "", target.dataset.shelfId || "");
+  });
+  copyShelfButton.addEventListener("click", () => {
+    void handleShelfAction("copy", "all");
+  });
+  clearShelfButton.addEventListener("click", () => clearContextShelf());
+  promptDraftTextarea.addEventListener("input", () => savePromptDraft(promptDraftTextarea.value));
+  templateVariableList.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-template-var]") : null;
+    if (!target) {
+      return;
+    }
+    insertTemplateVariable(target.dataset.templateVar as TemplateVariableKey);
+  });
+  draftTargetSelect.addEventListener("change", () => {
+    savePromptDraftTarget(draftTargetSelect.value);
+  });
+  insertDraftButton.addEventListener("click", () => {
+    void insertPromptDraft();
+  });
+  copyDraftButton.addEventListener("click", () => {
+    void copyPromptDraft();
+  });
+  clearDraftButton.addEventListener("click", () => clearPromptDraft());
+  tryDraftButton.addEventListener("click", () => {
+    void tryPromptDraftInSelectedService();
+  });
 
   document.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof Node)) {
       return;
     }
+    const inContextPopover = contextPopover.contains(target);
+    const inPromptPalette = promptPalette.contains(target);
+    const inContextShelf = contextShelfPanel.contains(target);
+    const inPromptDraft = promptDraftPanel.contains(target);
+    const inComposerToolbar = composerToolbar.contains(target);
     if (!serviceMenu.contains(target)) {
       closeServiceMenu();
     }
-    if (!contextPopover.contains(target) && !composerToolbar.contains(target)) {
+    if (!inContextPopover && !inComposerToolbar) {
       closeContextPopover();
     }
-    if (!promptPalette.contains(target) && !composerToolbar.contains(target)) {
+    if (!inPromptPalette && !inComposerToolbar) {
       closePromptPalette();
     }
-    if (!contextPopover.contains(target) && !promptPalette.contains(target) && !composerToolbar.contains(target)) {
+    if (!inContextShelf && !inComposerToolbar && !inContextPopover) {
+      closeContextShelfPanel();
+    }
+    if (!inPromptDraft && !inComposerToolbar && !inContextPopover && !inContextShelf) {
+      closePromptDraftPanel();
+    }
+    if (!inContextPopover && !inPromptPalette && !inContextShelf && !inPromptDraft && !inComposerToolbar) {
       closeComposerMenus();
     }
   });
@@ -387,11 +496,13 @@ function closeContextPopover(): void {
 function closeComposerMenus(): void {
   closeContextPopover();
   closePromptPalette();
+  closeContextShelfPanel();
+  closePromptDraftPanel();
   setComposerExpanded(false);
 }
 
 function syncDismissLayer(): void {
-  dismissLayer.hidden = contextPopover.hidden && promptPalette.hidden;
+  dismissLayer.hidden = contextPopover.hidden && promptPalette.hidden && contextShelfPanel.hidden && promptDraftPanel.hidden;
 }
 
 function renderContextActions(context: PageContext): void {
@@ -403,7 +514,7 @@ function renderContextActions(context: PageContext): void {
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.mode = action.mode;
-    button.textContent = action.label;
+    button.textContent = contextActionLabel(action.mode, action.label);
     if (action.requiresSelection && selectionLength === 0) {
       button.title = tr("side.noSelectionTitle");
       button.disabled = true;
@@ -414,13 +525,20 @@ function renderContextActions(context: PageContext): void {
 }
 
 async function handleContextAction(mode: ContextMode): Promise<void> {
-  const context = lastContext || await collectPageContext();
+  const context = contextModeUsesPageText(mode)
+    ? await collectPageContext({ includePageText: true })
+    : lastContext || await collectPageContext();
+  lastContext = context;
   if (mode === "selection" && !context.selection.trim()) {
     showToast(tr("side.noSelectionTitle"));
     return;
   }
+  if (contextModeUsesPageText(mode) && !context.pageText?.trim()) {
+    showToast(uiText("Page body is unavailable on this page.", "このページの本文を取得できませんでした"));
+    return;
+  }
 
-  const text = renderContextTemplate(context, mode, uiLanguage);
+  const text = renderSidePanelContextTemplate(context, mode, uiLanguage);
   if (!text) {
     showToast(tr("side.contextUnavailable"));
     return;
@@ -450,6 +568,46 @@ function closePromptPalette(): void {
   delete promptPalette.dataset.open;
   promptPalette.hidden = true;
   promptButton.setAttribute("aria-expanded", "false");
+  syncDismissLayer();
+}
+
+function openContextShelfPanel(): void {
+  closeContextPopover();
+  closePromptPalette();
+  closePromptDraftPanel();
+  setComposerExpanded(true);
+  shelfButton.setAttribute("aria-expanded", "true");
+  contextShelfPanel.hidden = false;
+  contextShelfPanel.dataset.open = "true";
+  renderContextShelf();
+  syncDismissLayer();
+}
+
+function closeContextShelfPanel(): void {
+  delete contextShelfPanel.dataset.open;
+  contextShelfPanel.hidden = true;
+  shelfButton.setAttribute("aria-expanded", "false");
+  syncDismissLayer();
+}
+
+function openPromptDraftPanel(): void {
+  closeContextPopover();
+  closePromptPalette();
+  closeContextShelfPanel();
+  setComposerExpanded(true);
+  draftButton.setAttribute("aria-expanded", "true");
+  promptDraftPanel.hidden = false;
+  promptDraftPanel.dataset.open = "true";
+  renderDraftTargetOptions();
+  renderTemplateVariableList();
+  syncDismissLayer();
+  window.setTimeout(() => promptDraftTextarea.focus(), 0);
+}
+
+function closePromptDraftPanel(): void {
+  delete promptDraftPanel.dataset.open;
+  promptDraftPanel.hidden = true;
+  draftButton.setAttribute("aria-expanded", "false");
   syncDismissLayer();
 }
 
@@ -542,7 +700,7 @@ async function handlePromptSelection(templateId: string): Promise<void> {
     return;
   }
 
-  const context = await collectPageContext();
+  const context = withPromptDraftContext(await collectPageContext({ includePageText: promptBodyNeedsExtractedPageText(template.body) }));
   const service = currentAIService();
   const text = renderPromptTemplate(template.body, context, service, uiLanguage);
   rememberPromptTemplate(template.id);
@@ -552,22 +710,41 @@ async function handlePromptSelection(templateId: string): Promise<void> {
   setComposerExpanded(false);
 }
 
-async function collectPageContext(): Promise<PageContext> {
+async function collectPageContext(options: { includePageText?: boolean } = {}): Promise<PageContext> {
   const fallback = emptyPageContext();
   const response = await sendMessage({ type: Messages.GET_PAGE_CONTEXT });
   if (!response.ok || !response.pageContext) {
-    return fallback;
+    return options.includePageText ? enrichPageContextWithPageText(fallback) : fallback;
   }
 
-  return normalizePageContext(response.pageContext);
+  const context = normalizePageContext(response.pageContext);
+  return options.includePageText ? enrichPageContextWithPageText(context) : context;
 }
 
 function normalizePageContext(context: PageContext): PageContext {
+  const url = typeof context.url === "string" ? context.url : "";
+  const headings = Array.isArray(context.headings)
+    ? context.headings.filter((heading): heading is string => typeof heading === "string").map((heading) => heading.trim()).filter(Boolean)
+    : undefined;
   return {
     title: typeof context.title === "string" ? context.title : "",
-    url: typeof context.url === "string" ? context.url : "",
+    url,
     selection: typeof context.selection === "string" ? context.selection : "",
-    timestamp: typeof context.timestamp === "number" ? context.timestamp : Date.now()
+    timestamp: typeof context.timestamp === "number" ? context.timestamp : Date.now(),
+    domain: typeof context.domain === "string" ? context.domain : domainFromContextUrl(url),
+    headings,
+    draft: typeof context.draft === "string" ? context.draft : undefined,
+    pageText: typeof context.pageText === "string" ? context.pageText : undefined,
+    pageTextSource: normalizePageTextSource(context.pageTextSource),
+    pageTextTruncated: typeof context.pageTextTruncated === "boolean" ? context.pageTextTruncated : undefined,
+    pageTextLimit: typeof context.pageTextLimit === "number" ? context.pageTextLimit : undefined
+  };
+}
+
+function withPromptDraftContext(context: PageContext): PageContext {
+  return {
+    ...context,
+    draft: currentPromptDraftText()
   };
 }
 
@@ -576,8 +753,30 @@ function emptyPageContext(): PageContext {
     title: "",
     url: "",
     selection: "",
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    domain: ""
   };
+}
+
+async function enrichPageContextWithPageText(context: PageContext): Promise<PageContext> {
+  const response = await sendMessage({ type: Messages.EXTRACT_ACTIVE_TAB_PAGE_TEXT });
+  if (!response.ok || !response.extractedPageContext) {
+    return context;
+  }
+
+  const extracted = response.extractedPageContext;
+  const source = normalizePageTextSource(extracted.source);
+  return normalizePageContext({
+    ...context,
+    title: extracted.title || context.title,
+    url: extracted.url || context.url,
+    domain: extracted.domain || context.domain,
+    headings: extracted.headings,
+    pageText: extracted.pageText,
+    pageTextSource: source,
+    pageTextTruncated: Boolean(extracted.truncated?.pageText),
+    timestamp: extracted.timestamp || context.timestamp
+  });
 }
 
 async function insertIntoAI(text: string) {
@@ -642,6 +841,8 @@ function contextToastMessage(mode: ContextMode, result: { method: "direct" | "cl
     case "full_context":
     case "ask_about_page":
     case "summarize_page":
+    case "page_text":
+    case "summarize_page_with_text":
       return uiLanguage === "ja" ? "入力欄に挿入しました" : "Inserted into the input.";
   }
 }
@@ -666,6 +867,577 @@ async function loadPromptTemplates(): Promise<void> {
   if (!promptPalette.hidden) {
     renderPromptList();
   }
+}
+
+async function handleAddCurrentContextToShelf(): Promise<void> {
+  const context = await collectPageContext({ includePageText: true });
+  lastContext = context;
+  const items = createContextShelfItems(context);
+  if (items.length === 0) {
+    showToast(tr("side.contextUnavailable"));
+    return;
+  }
+
+  addContextShelfItems(items);
+  closeContextPopover();
+  openContextShelfPanel();
+  showToast(tr("side.shelfAdded"));
+}
+
+async function handleSendCurrentContextToDraft(): Promise<void> {
+  const context = await collectPageContext({ includePageText: true });
+  lastContext = context;
+  const text = formatShelfText(createContextShelfItems(context));
+  if (!text) {
+    showToast(tr("side.contextUnavailable"));
+    return;
+  }
+
+  setPromptDraft(text);
+  closeContextPopover();
+  openPromptDraftPanel();
+  showToast(tr("side.shelfSentToDraft"));
+}
+
+function createContextShelfItems(context: PageContext): ContextShelfItem[] {
+  const items: ContextShelfItem[] = [];
+  const titleUrl = renderContextTemplate(context, "title_url", uiLanguage);
+  if (titleUrl) {
+    items.push(createContextShelfItem(context, titleUrl, uiText("Title + URL", "タイトル + URL")));
+  }
+  if (context.selection.trim()) {
+    items.push(createContextShelfItem(context, context.selection.trim(), uiText("Selection", "選択テキスト")));
+  }
+  if (context.pageText?.trim()) {
+    items.push(createContextShelfItem(
+      context,
+      renderSidePanelContextTemplate(context, "page_text", uiLanguage),
+      uiText("Page body", "本文")
+    ));
+  }
+  return items;
+}
+
+function createContextShelfItem(context: PageContext, text: string, label: string): ContextShelfItem {
+  return {
+    id: makeLocalId(),
+    title: label,
+    subtitle: contextShelfSubtitle(context),
+    text,
+    createdAt: Date.now()
+  };
+}
+
+function addContextShelfItems(items: ContextShelfItem[]): void {
+  contextShelfItems = [
+    ...items,
+    ...contextShelfItems.filter((existing) => !items.some((item) => item.text === existing.text))
+  ].slice(0, CONTEXT_SHELF_LIMIT);
+  saveContextShelfItems();
+  renderContextShelf();
+}
+
+async function drainPendingContextShelfItems(): Promise<void> {
+  try {
+    const sessionArea = chrome.storage.session;
+    if (!sessionArea) {
+      return;
+    }
+    const stored = await sessionArea.get(PENDING_CONTEXT_SHELF_ITEMS_KEY);
+    const pending = normalizePendingContextShelfItems(stored[PENDING_CONTEXT_SHELF_ITEMS_KEY]);
+    if (pending.length === 0) {
+      return;
+    }
+
+    addContextShelfItems(pending);
+    await sessionArea.remove(PENDING_CONTEXT_SHELF_ITEMS_KEY);
+    openContextShelfPanel();
+    showToast(tr("side.shelfAdded"));
+  } catch (error) {
+    console.warn("Failed to drain pending Context Shelf items.", error);
+  }
+}
+
+function renderContextShelf(): void {
+  contextShelfList.textContent = "";
+  copyShelfButton.disabled = contextShelfItems.length === 0;
+  clearShelfButton.disabled = contextShelfItems.length === 0;
+
+  if (contextShelfItems.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "shelf-empty";
+    empty.textContent = uiText("No saved context yet.", "保存済みContextはまだありません");
+    contextShelfList.append(empty);
+    return;
+  }
+
+  const globalActions = document.createElement("div");
+  globalActions.className = "composer-secondary-actions";
+  globalActions.append(
+    shelfActionButton("all", "insert", tr("side.shelfInsert")),
+    shelfActionButton("all", "draft", tr("side.shelfToDraft")),
+    shelfActionButton("all", "copy", tr("side.shelfCopyAll"))
+  );
+  contextShelfList.append(globalActions);
+
+  for (const item of contextShelfItems) {
+    const row = document.createElement("article");
+    row.className = "shelf-row";
+
+    const header = document.createElement("div");
+    header.className = "shelf-row-header";
+
+    const title = document.createElement("div");
+    title.className = "shelf-row-title";
+    title.textContent = item.title;
+
+    const meta = document.createElement("div");
+    meta.className = "shelf-row-meta";
+    meta.textContent = [item.subtitle, formatShelfTime(item.createdAt)].filter(Boolean).join(" · ");
+
+    header.append(title, meta);
+
+    const preview = document.createElement("div");
+    preview.className = "shelf-row-preview";
+    preview.textContent = item.text;
+
+    const actions = document.createElement("div");
+    actions.className = "shelf-row-actions";
+    actions.append(
+      shelfActionButton(item.id, "insert", uiText("Insert", "挿入")),
+      shelfActionButton(item.id, "draft", uiText("Draft", "Draft")),
+      shelfActionButton(item.id, "copy", uiText("Copy", "コピー")),
+      shelfActionButton(item.id, "delete", uiText("Delete", "削除"))
+    );
+
+    row.append(header, preview, actions);
+    contextShelfList.append(row);
+  }
+}
+
+function shelfActionButton(itemId: string, action: string, label: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.shelfAction = action;
+  button.dataset.shelfId = itemId;
+  button.textContent = label;
+  return button;
+}
+
+async function handleShelfAction(action: string, itemId: string): Promise<void> {
+  const items = itemId === "all" ? contextShelfItems : contextShelfItems.filter((entry) => entry.id === itemId);
+  const text = formatShelfText(items);
+  if (items.length === 0) {
+    return;
+  }
+
+  switch (action) {
+    case "insert": {
+      const result = await insertIntoAI(text);
+      closeContextShelfPanel();
+      showToast(insertResultMessage(result, uiText("Inserted from Shelf.", "Shelfから挿入しました")));
+      setComposerExpanded(false);
+      break;
+    }
+    case "draft":
+      setPromptDraft(text);
+      openPromptDraftPanel();
+      showToast(tr("side.shelfSentToDraft"));
+      break;
+    case "copy": {
+      const copied = await copyTextFromSidePanel(text);
+      showToast(copied ? tr("side.shelfCopied") : tr("side.copyFailed"));
+      break;
+    }
+    case "delete":
+      contextShelfItems = contextShelfItems.filter((entry) => entry.id !== itemId);
+      saveContextShelfItems();
+      renderContextShelf();
+      break;
+  }
+}
+
+function clearContextShelf(): void {
+  if (contextShelfItems.length === 0) {
+    return;
+  }
+  contextShelfItems = [];
+  saveContextShelfItems();
+  renderContextShelf();
+  showToast(tr("side.shelfCleared"));
+}
+
+function readContextShelfItems(): ContextShelfItem[] {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(CONTEXT_SHELF_KEY) || "[]");
+    return Array.isArray(value)
+      ? value.map(normalizeContextShelfItem).filter((item): item is ContextShelfItem => !!item).slice(0, CONTEXT_SHELF_LIMIT)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeContextShelfItem(value: unknown): ContextShelfItem | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const item = value as Partial<ContextShelfItem>;
+  if (typeof item.text !== "string" || !item.text.trim()) {
+    return null;
+  }
+  return {
+    id: typeof item.id === "string" && item.id ? item.id : makeLocalId(),
+    title: typeof item.title === "string" && item.title ? item.title : uiText("Saved context", "保存済みContext"),
+    subtitle: typeof item.subtitle === "string" ? item.subtitle : "",
+    text: item.text,
+    createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now()
+  };
+}
+
+function saveContextShelfItems(): void {
+  sessionStorage.setItem(CONTEXT_SHELF_KEY, JSON.stringify(contextShelfItems));
+}
+
+function formatShelfText(items: ContextShelfItem[]): string {
+  return items
+    .map((item, index) => [`#${index + 1} ${item.title}`, item.subtitle, "", item.text].filter((line) => line !== "").join("\n"))
+    .join("\n\n---\n\n")
+    .trim();
+}
+
+function setPromptDraft(text: string): void {
+  promptDraftTextarea.value = text;
+  savePromptDraft(text);
+}
+
+function readPromptDraft(): string {
+  try {
+    return sessionStorage.getItem(PROMPT_DRAFT_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function currentPromptDraftText(): string {
+  return promptDraftTextarea.value || readPromptDraft();
+}
+
+function savePromptDraft(text: string): void {
+  sessionStorage.setItem(PROMPT_DRAFT_KEY, text);
+}
+
+function clearPromptDraft(): void {
+  if (!promptDraftTextarea.value) {
+    return;
+  }
+  setPromptDraft("");
+  promptDraftTextarea.focus();
+  showToast(uiText("Draft cleared.", "Draftを空にしました"));
+}
+
+async function insertPromptDraft(): Promise<void> {
+  const rendered = await renderPromptDraftForService(currentAIService());
+  if (!rendered.text) {
+    showToast(uiText("Draft is empty.", "Draftが空です"));
+    return;
+  }
+  if (rendered.missingPageText) {
+    showToast(uiText("Page body is unavailable on this page.", "このページの本文を取得できませんでした"));
+    return;
+  }
+
+  const result = await insertIntoAI(rendered.text);
+  closePromptDraftPanel();
+  showToast(insertResultMessage(result, uiText("Draft inserted.", "Draftを挿入しました")));
+  setComposerExpanded(false);
+}
+
+async function copyPromptDraft(): Promise<void> {
+  const rendered = await renderPromptDraftForService(currentAIService());
+  if (!rendered.text) {
+    showToast(uiText("Draft is empty.", "Draftが空です"));
+    return;
+  }
+  if (rendered.missingPageText) {
+    showToast(uiText("Page body is unavailable on this page.", "このページの本文を取得できませんでした"));
+    return;
+  }
+
+  const copied = await copyTextFromSidePanel(rendered.text);
+  showToast(copied ? tr("common.copied") : tr("side.copyFailed"));
+}
+
+async function tryPromptDraftInSelectedService(): Promise<void> {
+  if (isDiagnosticBusy()) {
+    showToast(uiText("Finish the active diagnostic first.", "診断が終わってから試してください"));
+    return;
+  }
+
+  const target = serviceOptions().find((option) => option.id === draftTargetSelect.value);
+  if (!target) {
+    showToast(uiText("Choose a target AI.", "試すAIを選んでください"));
+    return;
+  }
+
+  savePromptDraftTarget(target.id);
+  const rendered = await renderPromptDraftForService(detectAIService(target.url));
+  if (!rendered.text) {
+    showToast(uiText("Draft is empty.", "Draftが空です"));
+    return;
+  }
+  if (rendered.missingPageText) {
+    showToast(uiText("Page body is unavailable on this page.", "このページの本文を取得できませんでした"));
+    return;
+  }
+
+  if (!isActiveService(target) || !sameFrameSource(currentUrl, target.url)) {
+    await selectService(target.id);
+    await waitForTargetFrame(target.url, DRAFT_TRY_LOAD_WAIT_MS);
+  }
+
+  const result = await insertIntoAI(rendered.text);
+  closePromptDraftPanel();
+  showToast(insertResultMessage(result, uiText(`Tried in ${target.label}.`, `${target.label}で試しました`)));
+  setComposerExpanded(false);
+}
+
+async function renderPromptDraftForService(service: AIService): Promise<{ text: string; missingPageText: boolean }> {
+  const source = promptDraftTextarea.value.trim();
+  if (!source) {
+    return { text: "", missingPageText: false };
+  }
+
+  const context = await collectPageContext({ includePageText: promptBodyNeedsExtractedPageText(source) });
+  const renderContext = { ...context, draft: "" };
+  return {
+    text: renderPromptTemplate(source, renderContext, service, uiLanguage),
+    missingPageText: promptBodyNeedsPageTextValue(source) && !renderContext.pageText?.trim()
+  };
+}
+
+function renderTemplateVariableList(): void {
+  templateVariableList.textContent = "";
+  for (const key of TEMPLATE_VARIABLE_KEYS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.templateVar = key;
+    button.title = `{{${key}}}`;
+    button.textContent = templateVariableLabel(key);
+    templateVariableList.append(button);
+  }
+}
+
+function insertTemplateVariable(key: TemplateVariableKey): void {
+  const token = `{{${key}}}`;
+  const start = promptDraftTextarea.selectionStart;
+  const end = promptDraftTextarea.selectionEnd;
+  const current = promptDraftTextarea.value;
+  const next = `${current.slice(0, start)}${token}${current.slice(end)}`;
+  setPromptDraft(next);
+  promptDraftTextarea.focus();
+  const cursor = start + token.length;
+  promptDraftTextarea.setSelectionRange(cursor, cursor);
+}
+
+function renderDraftTargetOptions(): void {
+  const options = serviceOptions();
+  const preferred = draftTargetSelect.value || readPromptDraftTarget();
+  const fallback = options.find((option) => !isActiveService(option)) || options[0];
+  const selected = options.find((option) => option.id === preferred) || fallback;
+
+  draftTargetSelect.textContent = "";
+  for (const option of options) {
+    const choice = document.createElement("option");
+    choice.value = option.id;
+    choice.textContent = isActiveService(option)
+      ? `${option.label} · ${uiText("current", "現在")}`
+      : option.label;
+    draftTargetSelect.append(choice);
+  }
+
+  const hasOptions = options.length > 0;
+  draftTargetSelect.disabled = !hasOptions;
+  tryDraftButton.disabled = !hasOptions;
+  if (selected) {
+    draftTargetSelect.value = selected.id;
+  }
+}
+
+function readPromptDraftTarget(): string {
+  try {
+    return sessionStorage.getItem(PROMPT_DRAFT_TARGET_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function savePromptDraftTarget(value: string): void {
+  sessionStorage.setItem(PROMPT_DRAFT_TARGET_KEY, value);
+}
+
+function waitForTargetFrame(url: string, timeoutMs: number): Promise<void> {
+  if (completedLoadToken === loadToken && sameFrameSource(aiFrame.src, url)) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const frame = aiFrame;
+    let settled = false;
+    let timeout = 0;
+    const done = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timeout);
+      frame.removeEventListener("load", onLoad);
+      resolve();
+    };
+    const onLoad = () => done();
+    timeout = window.setTimeout(done, timeoutMs);
+    frame.addEventListener("load", onLoad, { once: true });
+  });
+}
+
+function insertResultMessage(result: { method: "direct" | "clipboard"; message?: string }, directMessage: string): string {
+  return result.method === "direct" ? directMessage : result.message || tr("side.noInputCopied");
+}
+
+function contextActionLabel(mode: ContextMode, fallback: string): string {
+  switch (mode) {
+    case "page_text":
+      return uiText("Insert page body", "本文を挿入");
+    case "summarize_page_with_text":
+      return uiText("Summarize with body", "本文つきで要約");
+    default:
+      return fallback;
+  }
+}
+
+function renderSidePanelContextTemplate(context: PageContext, mode: ContextMode, language: ResolvedLanguage): string {
+  if (mode === "page_text" || mode === "summarize_page_with_text") {
+    return renderPageBodyContextTemplate(context, mode);
+  }
+
+  return renderContextTemplate(context, mode, language);
+}
+
+function renderPageBodyContextTemplate(context: PageContext, mode: Extract<ContextMode, "page_text" | "summarize_page_with_text">): string {
+  const title = context.title.trim();
+  const url = context.url.trim();
+  const domain = (context.domain || domainFromContextUrl(url)).trim();
+  const headings = Array.isArray(context.headings) ? context.headings.map((heading) => heading.trim()).filter(Boolean) : [];
+  const pageText = (context.pageText || "").trim();
+  const lines = mode === "summarize_page_with_text"
+    ? [uiText("Please summarize this page using the body text.", "次のページ本文を使って要約してください"), ""]
+    : [];
+
+  lines.push(
+    uiText("Title:", "タイトル:"),
+    title,
+    "",
+    uiText("URL:", "URL:"),
+    url
+  );
+
+  if (domain) {
+    lines.push("", uiText("Domain:", "ドメイン:"), domain);
+  }
+  if (headings.length > 0) {
+    lines.push("", uiText("Headings:", "見出し:"), headings.join("\n"));
+  }
+  if (pageText) {
+    lines.push("", uiText("Page body:", "本文:"), pageText);
+  }
+  if (context.pageTextTruncated) {
+    lines.push("", uiText("Page body was truncated.", "本文は途中まで取得されています"));
+  }
+
+  return compactLines(lines);
+}
+
+function contextModeUsesPageText(mode: ContextMode): boolean {
+  return mode === "page_text" || mode === "summarize_page_with_text";
+}
+
+function promptBodyNeedsExtractedPageText(body: string): boolean {
+  return /\{\{(?:pageText|headings|domain)\}\}/.test(body);
+}
+
+function promptBodyNeedsPageTextValue(body: string): boolean {
+  return /\{\{pageText\}\}/.test(body);
+}
+
+function templateVariableLabel(key: TemplateVariableKey): string {
+  switch (key) {
+    case "title":
+      return uiText("Title", "タイトル");
+    case "url":
+      return "URL";
+    case "selection":
+      return uiText("Selection", "選択範囲");
+    case "date":
+      return uiText("Date", "日付");
+    case "service":
+      return uiText("Service", "サービス");
+    case "draft":
+      return "Draft";
+    case "domain":
+      return uiText("Domain", "ドメイン");
+    case "headings":
+      return uiText("Headings", "見出し");
+    case "pageText":
+      return uiText("Page Body", "本文");
+  }
+}
+
+function contextShelfSubtitle(context: PageContext): string {
+  const parts = [
+    context.domain || domainFromContextUrl(context.url),
+    context.selection.trim() ? uiText("Selection included", "選択範囲あり") : ""
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
+function formatShelfTime(value: number): string {
+  try {
+    return new Date(value).toLocaleString(uiLanguage === "ja" ? "ja-JP" : "en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  } catch {
+    return "";
+  }
+}
+
+function normalizePageTextSource(source: unknown): PageContext["pageTextSource"] | undefined {
+  return source === "article" || source === "main" || source === "body" || source === "document" || source === "fallback" ? source : undefined;
+}
+
+function domainFromContextUrl(url: string | undefined): string {
+  if (!url) {
+    return "";
+  }
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function compactLines(lines: string[]): string {
+  return lines.join("\n").replace(/\n{4,}/g, "\n\n\n").trim();
+}
+
+function makeLocalId(): string {
+  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function uiText(en: string, ja: string): string {
+  return uiLanguage === "ja" ? ja : en;
 }
 
 function showToast(message: string): void {
@@ -1346,6 +2118,9 @@ function syncSettingsUi(): void {
   if (!contextPopover.hidden && lastContext) {
     renderContextActions(lastContext);
   }
+  renderContextShelf();
+  renderTemplateVariableList();
+  renderDraftTargetOptions();
   renderDiagnostics();
 }
 
@@ -1396,6 +2171,29 @@ function localizeStaticUi(): void {
   promptButton.title = tr("side.openPromptPalette");
   const promptLabel = typeof promptButton.querySelector === "function" ? promptButton.querySelector(".composer-button-label") : null;
   if (promptLabel) promptLabel.textContent = tr("side.prompt");
+  shelfButton.title = uiText("Open Context Shelf", "Context Shelfを開く");
+  shelfButton.setAttribute("aria-label", shelfButton.title);
+  const shelfLabel = typeof shelfButton.querySelector === "function" ? shelfButton.querySelector(".composer-button-label") : null;
+  if (shelfLabel) shelfLabel.textContent = uiText("Shelf", "Shelf");
+  draftButton.title = uiText("Open Prompt Draft", "Prompt Draftを開く");
+  draftButton.setAttribute("aria-label", draftButton.title);
+  const draftLabel = typeof draftButton.querySelector === "function" ? draftButton.querySelector(".composer-button-label") : null;
+  if (draftLabel) draftLabel.textContent = uiText("Draft", "Draft");
+  addContextToShelfButton.textContent = uiText("Add to Shelf", "Shelfに追加");
+  sendContextToDraftButton.textContent = uiText("Send to Draft", "Draftへ送る");
+  contextShelfPanel.setAttribute("aria-label", "Context Shelf");
+  contextShelfTitle.textContent = "Context Shelf";
+  copyShelfButton.textContent = tr("side.shelfCopyAll");
+  clearShelfButton.textContent = uiText("Clear all", "すべて削除");
+  promptDraftPanel.setAttribute("aria-label", "Prompt Draft");
+  promptDraftTitle.textContent = "Prompt Draft";
+  promptDraftTextarea.placeholder = uiText("Draft a prompt...", "Promptを下書き...");
+  templateVariableList.setAttribute("aria-label", uiText("Template variables", "テンプレート変数"));
+  draftTargetSelect.setAttribute("aria-label", uiText("Try in another AI", "別のAIで試す"));
+  tryDraftButton.textContent = uiText("Try", "試す");
+  insertDraftButton.textContent = uiText("Insert", "挿入");
+  copyDraftButton.textContent = uiText("Copy", "コピー");
+  clearDraftButton.textContent = uiText("Clear", "クリア");
   moreActionsButton.title = tr("common.openSettings");
   moreActionsButton.setAttribute("aria-label", tr("common.openSettings"));
 }

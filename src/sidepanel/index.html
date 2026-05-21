@@ -48,11 +48,44 @@
         <section id="contextPopover" class="composer-popover context-popover" hidden aria-label="Context actions">
           <p id="contextSummary" class="composer-popover-hint">選択テキストなし</p>
           <div id="contextActions" class="composer-menu" role="menu"></div>
+          <div class="composer-popover-divider" aria-hidden="true"></div>
+          <div class="composer-secondary-actions" aria-label="Context shelf actions">
+            <button id="addContextToShelfButton" type="button">Add to Shelf</button>
+            <button id="sendContextToDraftButton" type="button">Send to Draft</button>
+          </div>
         </section>
 
         <section id="promptPalette" class="composer-popover prompt-palette" hidden role="dialog" aria-modal="false" aria-label="Prompt palette">
           <input id="promptSearchInput" class="prompt-search" type="search" placeholder="Promptを検索..." autocomplete="off">
           <div id="promptList" class="prompt-list" role="listbox" aria-label="Prompt templates"></div>
+        </section>
+
+        <section id="contextShelfPanel" class="composer-popover context-shelf-panel" hidden role="dialog" aria-modal="false" aria-label="Context Shelf">
+          <div class="composer-panel-header">
+            <h2 id="contextShelfTitle">Context Shelf</h2>
+            <div class="composer-panel-actions">
+              <button id="copyShelfButton" class="text-button" type="button">Copy all</button>
+              <button id="clearShelfButton" class="text-button" type="button">Clear all</button>
+            </div>
+          </div>
+          <div id="contextShelfList" class="context-shelf-list" aria-live="polite"></div>
+        </section>
+
+        <section id="promptDraftPanel" class="composer-popover prompt-draft-panel" hidden role="dialog" aria-modal="false" aria-label="Prompt Draft">
+          <div class="composer-panel-header">
+            <h2 id="promptDraftTitle">Prompt Draft</h2>
+          </div>
+          <textarea id="promptDraftTextarea" class="prompt-draft-textarea" rows="7" spellcheck="true" placeholder="Draft a prompt..."></textarea>
+          <div id="templateVariableList" class="template-variable-list" aria-label="Template variables"></div>
+          <div class="draft-target-row">
+            <select id="draftTargetSelect" class="draft-target-select" aria-label="Target AI"></select>
+            <button id="tryDraftButton" class="button" type="button">Try</button>
+          </div>
+          <div class="composer-secondary-actions draft-actions" aria-label="Draft actions">
+            <button id="insertDraftButton" type="button" data-draft-action="insert">Insert</button>
+            <button id="copyDraftButton" type="button" data-draft-action="copy">Copy</button>
+            <button id="clearDraftButton" type="button" data-draft-action="clear">Clear</button>
+          </div>
         </section>
 
         <section id="fallbackPanel" class="fallback" hidden>
@@ -91,6 +124,14 @@
           <button id="promptButton" class="composer-button" type="button" aria-haspopup="dialog" aria-expanded="false" title="Open prompt palette (⌘K / Ctrl+K)">
             <span class="composer-button-icon" aria-hidden="true">⌘</span>
             <span class="composer-button-label">Prompt</span>
+          </button>
+          <button id="shelfButton" class="composer-button" type="button" aria-haspopup="dialog" aria-expanded="false" title="Open Context Shelf">
+            <span class="composer-button-icon" aria-hidden="true">▤</span>
+            <span class="composer-button-label">Shelf</span>
+          </button>
+          <button id="draftButton" class="composer-button" type="button" aria-haspopup="dialog" aria-expanded="false" title="Open Prompt Draft">
+            <span class="composer-button-icon" aria-hidden="true">✎</span>
+            <span class="composer-button-label">Draft</span>
           </button>
         </div>
         <button id="moreActionsButton" class="icon-button settings-button" type="button" aria-label="Open settings" title="Open settings">

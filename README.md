@@ -63,6 +63,14 @@ The Side Panel keeps the AI frame visually primary. The header switches quick ac
 
 Quick access is managed in Options. ChatGPT, Gemini, and Claude appear in the header by default; other built-in services and custom URLs can be added or removed from the header there. HTTPS URLs can be entered with or without `https://`; local testing URLs may use `http://localhost`, `http://127.0.0.1`, or the same localhost inputs without a protocol.
 
+The composer adds optional context tools without changing the existing one-click Context actions or Prompt palette behavior:
+
+- Context actions still insert URL, title + URL, selected text, page context, page questions, and page summaries as before. The new body-aware actions are appended after those existing actions.
+- Body-aware actions fetch active-tab page text only after the user explicitly chooses them. They include extracted body text, headings, and domain, and never change the original Summarize this page action.
+- Context Shelf temporarily keeps title + URL, selected text, and extracted page body context for the current browser session. Selection text can also be added from the page context menu. Shelf items can be inserted into the current AI, sent to Draft, copied one by one or all together, removed one by one, or cleared together.
+- Prompt Draft is an editable textarea for text explicitly sent there. Draft text can be inserted into the current AI, copied, cleared, or tried in another selected AI. anyside attempts insertion and falls back to copy; it never auto-submits.
+- Prompt templates support `{{title}}`, `{{url}}`, `{{selection}}`, `{{date}}`, `{{service}}`, `{{draft}}`, `{{domain}}`, `{{headings}}`, and `{{pageText}}`. `{{draft}}` expands to the current Prompt Draft text. Templates that include `{{domain}}`, `{{headings}}`, or `{{pageText}}` trigger active-tab extraction only when the user selects that template.
+
 ## Developer diagnostics
 
 Developer diagnostics are hidden from the normal Side Panel UI. Open the side panel page with `?debug=1` to test each bundled AI service with frame-header relaxation skipped and applied.
@@ -104,10 +112,11 @@ If an iframe does not load or login is unreliable, use Open in side window. anys
 For the public privacy summary, see [`PRIVACY.md`](PRIVACY.md). For release permission and Chrome Web Store disclosure checks, see [`docs/chrome-web-store-checklist.md`](docs/chrome-web-store-checklist.md).
 
 - anyside does not send browsing content to any external server of its own.
-- Context and Prompt actions run only after a user action, then use the active tab title, URL, and selected text to build the requested text.
+- Context and Prompt actions run only after a user action, then use the active tab title, URL, selected text, and, for explicitly body-aware actions/templates only, extracted page text and headings to build the requested text.
+- Context Shelf and Prompt Draft are session-only browser-side state. They are not persisted as extension settings.
 - When an AI input page is connected, anyside may insert that user-requested text into the visible AI input field; otherwise it falls back to copying the text.
 - It does not auto-submit prompts.
-- The context menu only creates a prompt and copies it to your clipboard after a user action.
+- The context menu can create a prompt and copy it to your clipboard, or add the current selection to the session-only Context Shelf, after a user action.
 - The embedded iframe receives delegated `clipboard-write` permission so AI page copy buttons can work. It does not receive delegated `clipboard-read` permission. Extension-initiated clipboard writes use the extension/offscreen helper instead.
 
 ## Files

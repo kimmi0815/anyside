@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { makeCustomPresetId, resolveTarget } from "../dist/shared/presets.js";
 import { defaultSettings } from "../dist/shared/storage.js";
 import { labelFromUrl, normalizeUserUrl } from "../dist/shared/url.js";
+import { extractPageContentFromSnapshot } from "../dist/shared/pageContent.js";
 
 test("normalizeUserUrl accepts secure URLs and local development URLs", () => {
   assert.equal(normalizeUserUrl("example.com/path?q=1"), "https://example.com/path?q=1");
@@ -46,4 +47,37 @@ test("resolveTarget resolves saved custom URLs from settings", () => {
     url: "https://research.example.com/thread",
     isCustom: true
   });
+});
+
+test("extractPageContentFromSnapshot falls back article to main to body and tracks truncation", () => {
+  const articleFallback = extractPageContentFromSnapshot({
+    title: "  Article  ",
+    url: "https://docs.example.com/read",
+    headings: ["Intro", "Intro", "Cookie settings", "Details"],
+    articleText: "Cookie banner",
+    mainText: "Main paragraph ".repeat(20),
+    bodyText: "Body paragraph ".repeat(20)
+  }, { textLimit: 40, headingLimit: 2, now: 123 });
+
+  assert.equal(articleFallback.source, "main");
+  assert.equal(articleFallback.domain, "docs.example.com");
+  assert.deepEqual(articleFallback.headings, ["Intro", "Details"]);
+  assert.equal(articleFallback.pageText.length, 40);
+  assert.equal(articleFallback.truncated.pageText, true);
+  assert.equal(articleFallback.truncated.headings, false);
+  assert.equal(articleFallback.timestamp, 123);
+
+  const bodyFallback = extractPageContentFromSnapshot({
+    articleText: "",
+    mainText: "",
+    bodyText: [
+      "Navigation",
+      "Useful body text",
+      "Advertisement",
+      "Another useful line"
+    ].join("\n")
+  }, { textLimit: 100 });
+
+  assert.equal(bodyFallback.source, "body");
+  assert.equal(bodyFallback.pageText, "Useful body text\nAnother useful line");
 });

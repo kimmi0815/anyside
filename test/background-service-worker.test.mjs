@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { PENDING_CONTEXT_SHELF_ITEMS_KEY } from "../dist/shared/contextShelfSession.js";
 import { FRAME_COMPATIBILITY_DOMAINS } from "../dist/shared/presets.js";
 
 let importCounter = 0;
@@ -319,6 +320,217 @@ test("handleRuntimeMessage rejects senders that report a tab", async () => {
   assert.deepEqual(response, { ok: false, error: "Forbidden." });
 });
 
+test("GET_PAGE_CONTEXT remains lightweight and does not include page body text", async () => {
+  const scriptCalls = [];
+  const { worker } = await importWorker({
+    tabs: {
+      async query(queryInfo) {
+        return queryInfo.currentWindow
+          ? [{ id: 12, title: "Fallback title", url: "https://example.com/article", windowId: 1 }]
+          : [];
+      }
+    },
+    scripting: {
+      async executeScript(options) {
+        scriptCalls.push(options);
+        return [{
+          result: {
+            title: "Current title",
+            url: "https://example.com/article",
+            selection: "selected quote",
+            timestamp: 123
+          }
+        }];
+      }
+    }
+  });
+  const response = await worker.__testing.handleRuntimeMessage(
+    { type: "GET_PAGE_CONTEXT" },
+    extensionSender()
+  );
+
+  assert.equal(response.ok, true);
+  assert.deepEqual(response.pageContext, {
+    title: "Current title",
+    url: "https://example.com/article",
+    selection: "selected quote",
+    timestamp: 123
+  });
+  assert.equal(Object.hasOwn(response.pageContext, "pageText"), false);
+  assert.equal(scriptCalls.length, 1);
+  assert.deepEqual(scriptCalls[0].target, { tabId: 12 });
+});
+
+test("EXTRACT_ACTIVE_TAB_PAGE_TEXT injects only into the active tab and normalizes metadata", async () => {
+  const scriptCalls = [];
+  const longText = "x".repeat(30_010);
+  const { worker } = await importWorker({
+    tabs: {
+      async query(queryInfo) {
+        return queryInfo.currentWindow
+          ? [{ id: 24, title: "Fallback title", url: "https://example.com/fallback", windowId: 1 }]
+          : [];
+      }
+    },
+    scripting: {
+      async executeScript(options) {
+        scriptCalls.push(options);
+        return [{
+          result: {
+            title: "Extracted title",
+            url: "https://docs.example.com/path",
+            selection: "selected text",
+            headings: ["Intro", "A".repeat(350)],
+            articleText: longText,
+            mainText: "main text",
+            bodyText: "body text",
+            documentText: "document text"
+          }
+        }];
+      }
+    }
+  });
+  const response = await worker.__testing.handleRuntimeMessage(
+    { type: "EXTRACT_ACTIVE_TAB_PAGE_TEXT" },
+    extensionSender()
+  );
+
+  assert.equal(response.ok, true);
+  assert.equal(response.extractedPageContext.title, "Extracted title");
+  assert.equal(response.extractedPageContext.url, "https://docs.example.com/path");
+  assert.equal(response.extractedPageContext.selection, "selected text");
+  assert.equal(response.extractedPageContext.domain, "docs.example.com");
+  assert.deepEqual(response.extractedPageContext.headings, ["Intro", "A".repeat(300)]);
+  assert.equal(response.extractedPageContext.pageText.length, 30_000);
+  assert.equal(response.extractedPageContext.source, "article");
+  assert.deepEqual(response.extractedPageContext.truncated, { headings: true, pageText: true });
+  assert.equal(scriptCalls.length, 1);
+  assert.deepEqual(scriptCalls[0].target, { tabId: 24 });
+  assert.equal(scriptCalls[0].func, worker.__testing.capturePageContentSnapshotInPage);
+});
+
+test("EXTRACT_ACTIVE_TAB_PAGE_TEXT falls back from empty article to main text", async () => {
+  const { worker } = await importWorker({
+    tabs: {
+      async query(queryInfo) {
+        return queryInfo.currentWindow
+          ? [{ id: 25, title: "Fallback title", url: "https://example.com/read", windowId: 1 }]
+          : [];
+      }
+    },
+    scripting: {
+      async executeScript() {
+        return [{
+          result: {
+            title: "Fallback article",
+            url: "https://example.com/read",
+            headings: [],
+            articleText: "",
+            mainText: "Main article text ".repeat(20),
+            bodyText: "Body page text ".repeat(20),
+            documentText: "Document page text ".repeat(20)
+          }
+        }];
+      }
+    }
+  });
+  const response = await worker.__testing.handleRuntimeMessage(
+    { type: "EXTRACT_ACTIVE_TAB_PAGE_TEXT" },
+    extensionSender()
+  );
+
+  assert.equal(response.ok, true);
+  assert.equal(response.extractedPageContext.source, "main");
+  assert.match(response.extractedPageContext.pageText, /Main article text/);
+});
+
+test("EXTRACT_ACTIVE_TAB_PAGE_TEXT falls back without injection on restricted tabs", async () => {
+  let executeScriptCalled = false;
+  const { worker } = await importWorker({
+    tabs: {
+      async query(queryInfo) {
+        return queryInfo.currentWindow
+          ? [{ id: 31, title: "Settings", url: "chrome://settings/", windowId: 1 }]
+          : [];
+      }
+    },
+    scripting: {
+      async executeScript() {
+        executeScriptCalled = true;
+        return [];
+      }
+    }
+  });
+  const response = await worker.__testing.handleRuntimeMessage(
+    { type: "EXTRACT_ACTIVE_TAB_PAGE_TEXT" },
+    extensionSender()
+  );
+
+  assert.equal(response.ok, true);
+  assert.equal(executeScriptCalled, false);
+  assert.deepEqual(response.extractedPageContext, {
+    title: "Settings",
+    url: "chrome://settings/",
+    domain: "settings",
+    headings: [],
+    pageText: "",
+    selection: "",
+    timestamp: response.extractedPageContext.timestamp,
+    source: "fallback",
+    truncated: { headings: false, pageText: false }
+  });
+});
+
+test("capturePageContentSnapshotInPage captures article text and removes page chrome noise", async () => {
+  const { worker } = await importWorker();
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+  const previousWindow = globalThis.window;
+  globalThis.document = createExtractionDocument();
+  globalThis.location = {
+    href: "https://example.com/read",
+    hostname: "example.com"
+  };
+  globalThis.window = {
+    getSelection() {
+      return { toString: () => "selected article text" };
+    }
+  };
+
+  try {
+    const result = worker.__testing.capturePageContentSnapshotInPage({
+      maxCandidateTextLength: 70,
+      maxHeadingCount: 2,
+      maxHeadingLength: 18
+    });
+
+    assert.equal(result.title, "Readable page");
+    assert.equal(result.url, "https://example.com/read");
+    assert.equal(result.selection, "selected article text");
+    assert.deepEqual(result.headings, ["Article Heading", "A very long section heading that should clamp".slice(0, 18)]);
+    assert.match(result.articleText, /Article Heading/);
+    assert.match(result.articleText, /First paragraph with extra spaces\./);
+    assert.doesNotMatch(result.articleText, /Cookie banner|Navigation|Footer|alert/);
+    assert.equal(result.articleText.length, 70);
+  } finally {
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
+    if (previousLocation === undefined) {
+      delete globalThis.location;
+    } else {
+      globalThis.location = previousLocation;
+    }
+    if (previousWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
+    }
+  }
+});
+
 test("handleRuntimeMessage rejects senders with foreign extension ids", async () => {
   const { worker } = await importWorker();
   const response = await worker.__testing.handleRuntimeMessage(
@@ -451,6 +663,64 @@ test("AI agent connect ignores ports with a non ai-input-agent name", async () =
   assert.equal(worker.__testing.getRegisteredAgents().length, 0);
 });
 
+test("background context menus keep existing actions and add selection to Shelf", async () => {
+  const { chrome } = await importWorker();
+
+  chrome.runtime.onInstalled.dispatch();
+  await flushAsync();
+  await flushAsync();
+
+  assert.deepEqual(chrome.__createdContextMenus.map((menu) => menu.id), [
+    "ask-anyside-selection",
+    "add-selection-to-anyside-shelf",
+    "open-anyside"
+  ]);
+  assert.deepEqual(chrome.__createdContextMenus.map((menu) => menu.contexts), [
+    ["selection"],
+    ["selection"],
+    ["all"]
+  ]);
+  assert.equal(chrome.__createdContextMenus[0].title, "Ask anyside about selection");
+  assert.equal(chrome.__createdContextMenus[1].title, "Add selection to Context Shelf");
+});
+
+test("background selection Shelf menu queues selected text without clipboard copy", async () => {
+  const openedPanels = [];
+  let offscreenCreateCalls = 0;
+  const { chrome } = await importWorker({
+    async createDocument() {
+      offscreenCreateCalls += 1;
+    },
+    sidePanel: {
+      async open(openOptions) {
+        openedPanels.push(openOptions);
+      }
+    }
+  });
+
+  chrome.contextMenus.onClicked.dispatch(
+    {
+      menuItemId: "add-selection-to-anyside-shelf",
+      selectionText: "  Important selected text  "
+    },
+    {
+      id: 4,
+      windowId: 9,
+      title: "Article title",
+      url: "https://docs.example.com/article"
+    }
+  );
+  await flushAsync();
+
+  const pending = chrome.__sessionStorageData[PENDING_CONTEXT_SHELF_ITEMS_KEY];
+  assert.equal(offscreenCreateCalls, 0);
+  assert.deepEqual(openedPanels, [{ windowId: 9 }]);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].title, "Selection");
+  assert.equal(pending[0].subtitle, "Article title · docs.example.com");
+  assert.equal(pending[0].text, "Important selected text");
+});
+
 async function importWorker(options = {}) {
   const chrome = createChromeMock(options);
   globalThis.chrome = chrome;
@@ -458,6 +728,13 @@ async function importWorker(options = {}) {
   await flushAsync();
   const worker = { __testing: globalThis.__anysideBackgroundTesting };
   return { worker, chrome };
+}
+
+function extensionSender() {
+  return {
+    id: "anyside",
+    url: "chrome-extension://anyside/src/sidepanel/index.html"
+  };
 }
 
 function agent(overrides) {
@@ -473,7 +750,31 @@ function agent(overrides) {
 
 function createChromeMock(options = {}) {
   const storageData = {};
+  const sessionStorageData = {};
+  const createdContextMenus = [];
   const enabledStaticRulesets = new Set();
+  const makeStorageArea = (data) => ({
+    async get(keys) {
+      if (Array.isArray(keys)) {
+        return Object.fromEntries(keys.map((key) => [key, data[key]]));
+      }
+      if (typeof keys === "string") {
+        return { [keys]: data[keys] };
+      }
+      return { ...data };
+    },
+    async set(values) {
+      if (chrome.__failStorageSet) {
+        throw new Error("storage set failed");
+      }
+      Object.assign(data, values);
+    },
+    async remove(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        delete data[key];
+      }
+    }
+  });
   const chrome = {
     runtime: {
       id: "anyside",
@@ -495,8 +796,12 @@ function createChromeMock(options = {}) {
     },
     contextMenus: {
       onClicked: createEvent(),
-      async removeAll() {},
-      create() {}
+      async removeAll() {
+        createdContextMenus.length = 0;
+      },
+      create(properties) {
+        createdContextMenus.push(properties);
+      }
     },
     declarativeNetRequest: {
       async updateEnabledRulesets(update) {
@@ -516,42 +821,32 @@ function createChromeMock(options = {}) {
       createDocument: options.createDocument || (async () => {})
     },
     scripting: {
-      async executeScript() {
+      async executeScript(details) {
+        if (options.scripting?.executeScript) {
+          return options.scripting.executeScript(details);
+        }
         return [];
       }
     },
     sidePanel: {
       async setPanelBehavior() {},
-      async open() {}
-    },
-    storage: {
-      onChanged: createEvent(),
-      local: {
-        async get(keys) {
-          if (Array.isArray(keys)) {
-            return Object.fromEntries(keys.map((key) => [key, storageData[key]]));
-          }
-          if (typeof keys === "string") {
-            return { [keys]: storageData[keys] };
-          }
-          return { ...storageData };
-        },
-        async set(values) {
-          if (chrome.__failStorageSet) {
-            throw new Error("storage set failed");
-          }
-          Object.assign(storageData, values);
-        },
-        async remove(keys) {
-          for (const key of Array.isArray(keys) ? keys : [keys]) {
-            delete storageData[key];
-          }
+      async open(openOptions) {
+        if (options.sidePanel?.open) {
+          await options.sidePanel.open(openOptions);
         }
       }
     },
+    storage: {
+      onChanged: createEvent(),
+      local: makeStorageArea(storageData),
+      session: makeStorageArea(sessionStorageData)
+    },
     tabs: {
       TAB_ID_NONE: -1,
-      async query() {
+      async query(queryInfo) {
+        if (options.tabs?.query) {
+          return options.tabs.query(queryInfo);
+        }
         return [];
       },
       async create() {
@@ -581,7 +876,101 @@ function createChromeMock(options = {}) {
     }
   };
   chrome.__enabledStaticRulesets = enabledStaticRulesets;
+  chrome.__createdContextMenus = createdContextMenus;
+  chrome.__storageData = storageData;
+  chrome.__sessionStorageData = sessionStorageData;
   return chrome;
+}
+
+function createExtractionDocument() {
+  const article = new FakeElement("article", "", [
+    new FakeElement("header", "Cookie banner"),
+    new FakeElement("h1", "Article Heading"),
+    new FakeElement("p", "First   paragraph with     extra spaces."),
+    new FakeElement("nav", "Navigation"),
+    new FakeElement("h2", "A very long section heading that should clamp"),
+    new FakeElement("p", "Second paragraph with enough text to exceed the small page text limit used by this test."),
+    new FakeElement("h3", "Third heading"),
+    new FakeElement("script", "alert('nope')"),
+    new FakeElement("footer", "Footer")
+  ]);
+  const main = new FakeElement("main", "Main fallback text");
+  const body = new FakeElement("body", "", [article, main]);
+  return new FakeDocument("Readable page", body);
+}
+
+class FakeDocument {
+  constructor(title, body) {
+    this.title = title;
+    this.body = body;
+    this.documentElement = new FakeElement("html", "", [body]);
+  }
+
+  querySelector(selector) {
+    return this.documentElement.find(selector);
+  }
+
+  querySelectorAll(selector) {
+    return this.documentElement.querySelectorAll(selector);
+  }
+}
+
+class FakeElement {
+  constructor(tagName, text = "", children = []) {
+    this.tagName = tagName;
+    this.text = text;
+    this.children = children;
+    this.removed = false;
+  }
+
+  cloneNode() {
+    return new FakeElement(
+      this.tagName,
+      this.text,
+      this.children.map((child) => child.cloneNode(true))
+    );
+  }
+
+  querySelectorAll(selector) {
+    const selectors = selector.split(",").map((item) => item.trim());
+    const matches = [];
+    const visit = (node) => {
+      for (const child of node.children) {
+        if (selectors.includes(child.tagName)) {
+          matches.push(child);
+        }
+        visit(child);
+      }
+    };
+    visit(this);
+    return matches;
+  }
+
+  find(selector) {
+    if (this.tagName === selector) {
+      return this;
+    }
+    for (const child of this.children) {
+      const found = child.find(selector);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  remove() {
+    this.removed = true;
+  }
+
+  get textContent() {
+    if (this.removed) {
+      return "";
+    }
+    return [this.text, ...this.children.map((child) => child.textContent)]
+      .filter(Boolean)
+      .join("\n");
+  }
 }
 
 function createMockPort({ name, sender }) {

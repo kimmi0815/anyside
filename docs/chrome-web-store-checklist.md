@@ -6,7 +6,7 @@ Use this checklist before public release and whenever `manifest.json` changes.
 
 - `activeTab`: Reads the currently active tab title, URL, and selection after an explicit user action for Context and Prompt actions.
 - `clipboardWrite`: Copies generated prompt text to the clipboard after user action or when AI-page insertion is unavailable.
-- `contextMenus`: Adds the selected-text context menu action.
+- `contextMenus`: Adds selected-text context menu actions for asking anyside about a selection or adding the selection to the session-only Context Shelf.
 - `declarativeNetRequest`: Supports short-lived iframe compatibility session rules for built-in AI-service subframes.
 - `declarativeNetRequestWithHostAccess`: Allows frame compatibility session rules to apply to the declared built-in AI-service hosts.
 - `offscreen`: Creates the extension offscreen document used for reliable clipboard writes.
@@ -42,7 +42,7 @@ The extension intentionally does not request the persistent `tabs` permission. I
 
 ## Data Disclosure Notes
 
-- Stored data is local Chrome extension storage: settings, custom URLs, diagnostics, service order, quick access visibility, and prompt templates.
+- Stored data is local Chrome extension storage: settings, custom URLs, diagnostics, service order, quick access visibility, and prompt templates. Context Shelf items, Prompt Draft text, and pending context-menu Shelf selections are session-only.
 - Active tab context is temporary and requested only after user action.
 - Clipboard writes are user-action driven or fallback behavior.
 - Custom URL favicon discovery omits credentials for extension fetches.

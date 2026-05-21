@@ -1,4 +1,6 @@
 import type { AIService, InsertResult, PageContext } from "../features/composer/types.js";
+import type { ExtractedPageContext } from "./pageContent.js";
+export type { ExtractedPageContext } from "./pageContent.js";
 
 export type PresetId =
   | "chatgpt"
@@ -85,6 +87,7 @@ export type RuntimeMessage =
   | { type: "END_FRAME_COMPATIBILITY_SESSION"; sessionId: string }
   | { type: "COPY_ACTIVE_TAB_PROMPT" }
   | { type: "COPY_TEXT"; text: string }
+  | { type: "EXTRACT_ACTIVE_TAB_PAGE_TEXT" }
   | { type: "GET_PAGE_CONTEXT" }
   | { type: "INSERT_TEXT_TO_AI"; text: string; service: AIService; url: string }
   | { type: "OPEN_FALLBACK_WINDOW"; url: string }
@@ -99,5 +102,6 @@ export type RuntimeResponse = {
   windowId?: number;
   text?: string;
   pageContext?: PageContext;
+  extractedPageContext?: ExtractedPageContext;
   insertResult?: InsertResult;
 };

@@ -4,13 +4,28 @@ import { FRAME_COMPATIBILITY_DOMAINS, isBuiltInPresetId } from "../shared/preset
 import { createActiveTabPrompt, createSelectionPrompt } from "../shared/prompt.js";
 import { FALLBACK_WINDOW_KEY, getSettings, SETTINGS_KEY } from "../shared/storage.js";
 import { resolveLanguage, t, type ResolvedLanguage } from "../shared/i18n.js";
+import { PAGE_HEADING_LIMIT, PAGE_TEXT_LIMIT, extractPageContentFromSnapshot, type PageContentSnapshot } from "../shared/pageContent.js";
+import {
+  PENDING_CONTEXT_SHELF_ITEMS_KEY,
+  PENDING_CONTEXT_SHELF_LIMIT,
+  normalizePendingContextShelfItems,
+  type PendingContextShelfItem
+} from "../shared/contextShelfSession.js";
 import type { AIInputInsertReason, AIService, InsertResult, PageContext } from "../features/composer/types.js";
-import type { FallbackWindowState, PresetId, RuntimeMessage, RuntimeResponse, Settings } from "../shared/types.js";
+import type {
+  ExtractedPageContext,
+  FallbackWindowState,
+  PresetId,
+  RuntimeMessage,
+  RuntimeResponse,
+  Settings
+} from "../shared/types.js";
 
 const DNR_RULESET_ID = "allow_framing_ai_sites";
 const DNR_SESSION_RULE_ID = 1001;
 const OFFSCREEN_DOCUMENT_PATH = "src/offscreen/clipboard.html";
 const MENU_SELECTION_ID = "ask-anyside-selection";
+const MENU_SELECTION_SHELF_ID = "add-selection-to-anyside-shelf";
 const MENU_OPEN_ID = "open-anyside";
 const LEGACY_FALLBACK_WINDOW_KEY = "aiSidecar.fallbackWindow";
 const AI_INPUT_AGENT_PORT = "ai-input-agent";
@@ -18,6 +33,9 @@ const INSERT_TIMEOUT_MS = 3000;
 const FRAME_COMPATIBILITY_SESSION_TTL_MS = 30000;
 const MAX_PROMPT_TEXT_LENGTH = 1_000_000;
 const MAX_PAGE_CONTEXT_STRING_LENGTH = 200_000;
+const MAX_EXTRACTED_PAGE_TEXT_LENGTH = PAGE_TEXT_LIMIT;
+const MAX_EXTRACTED_HEADING_COUNT = PAGE_HEADING_LIMIT;
+const MAX_EXTRACTED_HEADING_LENGTH = 300;
 
 type AiAgentRecord = {
   port: chrome.runtime.Port;
@@ -103,6 +121,11 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === MENU_SELECTION_ID && info.selectionText) {
     void handleSelectionContextMenu(info.selectionText, tab);
+    return;
+  }
+
+  if (info.menuItemId === MENU_SELECTION_SHELF_ID && info.selectionText) {
+    void handleSelectionShelfContextMenu(info.selectionText, tab);
     return;
   }
 
@@ -214,6 +237,11 @@ async function createContextMenus(): Promise<void> {
     contexts: ["selection"]
   });
   chrome.contextMenus.create({
+    id: MENU_SELECTION_SHELF_ID,
+    title: t(language, "background.menuAddSelectionToShelf"),
+    contexts: ["selection"]
+  });
+  chrome.contextMenus.create({
     id: MENU_OPEN_ID,
     title: t(language, "background.menuOpen"),
     contexts: ["all"]
@@ -267,6 +295,11 @@ async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runt
       await copyText(message.text);
       await flashBadge(t(await getResolvedLanguage(), "common.copied"));
       return { ok: true, text: message.text };
+    }
+
+    case Messages.EXTRACT_ACTIVE_TAB_PAGE_TEXT: {
+      const extractedPageContext = await extractPageContextFromActiveTab();
+      return { ok: true, extractedPageContext };
     }
 
     case Messages.GET_PAGE_CONTEXT: {
@@ -325,6 +358,192 @@ function isAllowedFallbackUrl(url: unknown): url is string {
     return false;
   } catch {
     return false;
+  }
+}
+
+async function extractPageContextFromActiveTab(): Promise<ExtractedPageContext> {
+  const tab = await getActiveTab();
+  const fallback = createExtractedPageContext(tab?.title, tab?.url, {
+    headings: [],
+    pageText: "",
+    source: "fallback",
+    truncated: { headings: false, pageText: false }
+  });
+  if (tab?.id === undefined || !canInjectIntoTab(tab)) {
+    return fallback;
+  }
+
+  try {
+    const [result] = await chrome.scripting.executeScript<PageContentSnapshot>({
+      target: { tabId: tab.id },
+      func: capturePageContentSnapshotInPage,
+      args: [{
+        maxCandidateTextLength: MAX_EXTRACTED_PAGE_TEXT_LENGTH * 2,
+        maxHeadingCount: MAX_EXTRACTED_HEADING_COUNT * 2,
+        maxHeadingLength: MAX_EXTRACTED_HEADING_LENGTH
+      }]
+    });
+
+    const extracted = extractPageContentFromSnapshot(result?.result || {}, {
+      textLimit: MAX_EXTRACTED_PAGE_TEXT_LENGTH,
+      headingLimit: MAX_EXTRACTED_HEADING_COUNT
+    });
+    return normalizeExtractedPageContext(extracted, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function createExtractedPageContext(
+  title: string | undefined,
+  url: string | undefined,
+  input: Pick<ExtractedPageContext, "headings" | "pageText" | "source" | "truncated">
+): ExtractedPageContext {
+  return {
+    title: title || "",
+    url: url || "",
+    domain: domainFromUrl(url || ""),
+    headings: input.headings,
+    pageText: input.pageText,
+    selection: "",
+    timestamp: Date.now(),
+    source: input.source,
+    truncated: input.truncated
+  };
+}
+
+function normalizeExtractedPageContext(
+  value: ExtractedPageContext | undefined,
+  fallback: ExtractedPageContext
+): ExtractedPageContext {
+  if (!value || typeof value !== "object") {
+    return fallback;
+  }
+
+  const rawHeadings = Array.isArray(value.headings)
+    ? value.headings.filter((heading): heading is string => typeof heading === "string")
+    : [];
+  const headings = rawHeadings
+    .map((heading) => clampString(heading, MAX_EXTRACTED_HEADING_LENGTH))
+    .slice(0, MAX_EXTRACTED_HEADING_COUNT);
+  const pageText = clampString(typeof value.pageText === "string" ? value.pageText : "", MAX_EXTRACTED_PAGE_TEXT_LENGTH);
+  const url = clampString(typeof value.url === "string" ? value.url : fallback.url, MAX_PAGE_CONTEXT_STRING_LENGTH);
+  const domain = clampString(
+    typeof value.domain === "string" && value.domain ? value.domain : domainFromUrl(url),
+    MAX_PAGE_CONTEXT_STRING_LENGTH
+  );
+  const source = normalizeExtractionSource(value.source);
+
+  return {
+    title: clampString(typeof value.title === "string" ? value.title : fallback.title, MAX_PAGE_CONTEXT_STRING_LENGTH),
+    url,
+    domain,
+    headings,
+    pageText,
+    selection: clampString(typeof value.selection === "string" ? value.selection : fallback.selection, MAX_PAGE_CONTEXT_STRING_LENGTH),
+    timestamp: typeof value.timestamp === "number" ? value.timestamp : Date.now(),
+    source,
+    truncated: {
+      headings: Boolean(value.truncated?.headings) ||
+        headings.length < rawHeadings.length ||
+        rawHeadings.some((heading) => heading.length > MAX_EXTRACTED_HEADING_LENGTH),
+      pageText: Boolean(value.truncated?.pageText) || (typeof value.pageText === "string" && value.pageText.length > pageText.length)
+    }
+  };
+}
+
+function normalizeExtractionSource(source: unknown): ExtractedPageContext["source"] {
+  return source === "article" || source === "main" || source === "body" || source === "document" || source === "fallback"
+    ? source
+    : "fallback";
+}
+
+function domainFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function capturePageContentSnapshotInPage(limits: {
+  maxCandidateTextLength: number;
+  maxHeadingCount: number;
+  maxHeadingLength: number;
+}): PageContentSnapshot {
+  const pageDocument = document;
+  const pageLocation = location;
+  const maxCandidateTextLength = Math.max(0, limits.maxCandidateTextLength);
+  const maxHeadingCount = Math.max(0, limits.maxHeadingCount);
+  const maxHeadingLength = Math.max(0, limits.maxHeadingLength);
+  const rawHeadings = Array.from(pageDocument.querySelectorAll("h1, h2, h3"))
+    .map((heading) => normalizeExtractedText(heading.textContent || ""))
+    .filter(Boolean);
+  const headings = rawHeadings
+    .map((heading) => clampExtractedText(heading, maxHeadingLength))
+    .slice(0, maxHeadingCount);
+
+  return {
+    title: pageDocument.title || "",
+    url: pageLocation.href || "",
+    selection: window.getSelection()?.toString() || "",
+    headings,
+    articleText: textFromElement(pageDocument.querySelector("article")),
+    mainText: textFromElement(pageDocument.querySelector("main")),
+    bodyText: textFromElement(pageDocument.body),
+    documentText: textFromElement(pageDocument.documentElement)
+  };
+
+  function textFromElement(element: Element | null): string {
+    const clone = element?.cloneNode(true) as Element | null | undefined;
+    if (!clone) {
+      return "";
+    }
+    clone.querySelectorAll([
+      "script",
+      "style",
+      "noscript",
+      "template",
+      "svg",
+      "canvas",
+      "iframe",
+      "nav",
+      "header",
+      "footer",
+      "aside",
+      "form",
+      "input",
+      "button",
+      "select",
+      "textarea",
+      "[aria-hidden='true']",
+      "[hidden]",
+      "[role='navigation']",
+      "[role='banner']",
+      "[role='contentinfo']",
+      "[role='complementary']",
+      "[style*='display: none']",
+      "[style*='display:none']",
+      "[style*='visibility: hidden']",
+      "[style*='visibility:hidden']"
+    ].join(",")).forEach((element) => element.remove());
+    return clampExtractedText(normalizeExtractedText(clone.textContent || ""), maxCandidateTextLength);
+  }
+
+  function normalizeExtractedText(value: string): string {
+    return value
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t\f\v]+/g, " ")
+      .split(/\r?\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function clampExtractedText(value: string, limit: number): string {
+    return value.length > limit ? value.slice(0, limit) : value;
   }
 }
 
@@ -717,6 +936,50 @@ async function handleSelectionContextMenu(selectionText: string, tab?: chrome.ta
   }
 }
 
+async function handleSelectionShelfContextMenu(selectionText: string, tab?: chrome.tabs.Tab): Promise<void> {
+  const language = await getResolvedLanguage();
+  const panelPromise = tab?.windowId !== undefined
+    ? openSidePanel(tab.windowId).catch(() => undefined)
+    : openSidePanel().catch(() => undefined);
+
+  try {
+    await queuePendingContextShelfItem(createPendingSelectionShelfItem(selectionText, tab, language));
+    await flashBadge(t(language, "common.saved")).catch(() => undefined);
+  } catch (error) {
+    console.warn("Failed to queue selected text for Context Shelf.", error);
+    await flashBadge(t(language, "common.error")).catch(() => undefined);
+  } finally {
+    await panelPromise;
+  }
+}
+
+async function queuePendingContextShelfItem(item: PendingContextShelfItem): Promise<void> {
+  const stored = await chrome.storage.session.get(PENDING_CONTEXT_SHELF_ITEMS_KEY);
+  const pending = normalizePendingContextShelfItems(stored[PENDING_CONTEXT_SHELF_ITEMS_KEY]);
+  const items = [
+    item,
+    ...pending.filter((existing) => existing.text !== item.text)
+  ].slice(0, PENDING_CONTEXT_SHELF_LIMIT);
+  await chrome.storage.session.set({ [PENDING_CONTEXT_SHELF_ITEMS_KEY]: items });
+}
+
+function createPendingSelectionShelfItem(selectionText: string, tab: chrome.tabs.Tab | undefined, language: ResolvedLanguage): PendingContextShelfItem {
+  const url = tab?.url || "";
+  const title = tab?.title?.trim() || domainFromUrl(url);
+  const domain = domainFromUrl(url);
+  return {
+    id: makePendingShelfItemId(),
+    title: language === "ja" ? "選択テキスト" : "Selection",
+    subtitle: [title, domain].filter(Boolean).join(" · "),
+    text: selectionText.trim(),
+    createdAt: Date.now()
+  };
+}
+
+function makePendingShelfItemId(): string {
+  return `pending-shelf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 async function getResolvedLanguage(): Promise<ResolvedLanguage> {
   const settings = await getSettings();
   return languageFromSettings(settings);
@@ -773,6 +1036,7 @@ export const __testing = {
   createFrameCompatibilitySessionRule,
   isFromExtensionPage,
   isAllowedFallbackUrl,
+  capturePageContentSnapshotInPage,
   handleRuntimeMessage,
   getRegisteredAgents(): AiAgentRecord[] {
     return [...aiInputAgents];

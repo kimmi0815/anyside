@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { PENDING_CONTEXT_SHELF_ITEMS_KEY } from "../dist/shared/contextShelfSession.js";
+
 test("side panel hides fallback when the iframe loads after the normal timeout", async () => {
   const scheduler = createScheduler();
   const document = createSidepanelDocument();
@@ -537,6 +539,182 @@ test("side panel does not request active tab context before a user action", asyn
   }
 });
 
+test("side panel prompt templates can use the current Prompt Draft", async () => {
+  const scheduler = createScheduler();
+  const document = createSidepanelDocument();
+  const storageData = {
+    "composer.promptTemplates": [
+      {
+        id: "custom:draft",
+        title: "Use Draft",
+        category: "Test",
+        body: "Draft:\n{{draft}}",
+        favorite: false,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ]
+  };
+  const runtimeMessages = [];
+  const sessionStorage = createLocalStorage();
+  sessionStorage.setItem("composer.promptDraft", "Draft paragraph");
+
+  globalThis.HTMLElement = FakeElement;
+  globalThis.Element = FakeElement;
+  globalThis.Node = FakeElement;
+  globalThis.HTMLButtonElement = FakeButtonElement;
+  globalThis.HTMLDetailsElement = FakeElement;
+  globalThis.HTMLIFrameElement = FakeIFrameElement;
+  globalThis.HTMLInputElement = FakeInputElement;
+  globalThis.HTMLImageElement = FakeImageElement;
+  globalThis.HTMLTableSectionElement = FakeElement;
+  globalThis.document = document;
+  globalThis.localStorage = createLocalStorage();
+  globalThis.sessionStorage = sessionStorage;
+  globalThis.window = {
+    location: { search: "" },
+    addEventListener() {},
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    setInterval: scheduler.setInterval,
+    clearInterval: scheduler.clearInterval
+  };
+  globalThis.chrome = createChromeMock(storageData);
+  globalThis.chrome.runtime.sendMessage = async (message) => {
+    runtimeMessages.push(message);
+    if (message.type === "GET_PAGE_CONTEXT") {
+      return { ok: true, pageContext: { title: "", url: "", selection: "", timestamp: 1 } };
+    }
+    if (message.type === "INSERT_TEXT_TO_AI") {
+      return {
+        ok: true,
+        insertResult: {
+          success: true,
+          method: "direct",
+          service: message.service,
+          reason: "inserted"
+        }
+      };
+    }
+    return { ok: true };
+  };
+
+  try {
+    await import(`../dist/sidepanel/main.js?draft-template-${Date.now()}`);
+    await flushAsync();
+
+    document.getElementById("promptButton").dispatch("click");
+    await flushAsync();
+    const promptRow = document.getElementById("promptList").children[0];
+    document.getElementById("promptList").dispatch("click", { target: promptRow });
+    await flushAsync();
+
+    const insertMessage = runtimeMessages.find((message) => message.type === "INSERT_TEXT_TO_AI");
+    assert.equal(insertMessage.text, "Draft:\nDraft paragraph");
+    assert.equal(runtimeMessages.some((message) => message.type === "EXTRACT_ACTIVE_TAB_PAGE_TEXT"), false);
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.document;
+    delete globalThis.localStorage;
+    delete globalThis.sessionStorage;
+    delete globalThis.window;
+    delete globalThis.HTMLElement;
+    delete globalThis.Element;
+    delete globalThis.Node;
+    delete globalThis.HTMLButtonElement;
+    delete globalThis.HTMLDetailsElement;
+    delete globalThis.HTMLIFrameElement;
+    delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLImageElement;
+    delete globalThis.HTMLTableSectionElement;
+  }
+});
+
+test("side panel drains context-menu Shelf selections and copies all Shelf materials", async () => {
+  const scheduler = createScheduler();
+  const document = createSidepanelDocument();
+  const storageData = {};
+  const sessionData = {
+    [PENDING_CONTEXT_SHELF_ITEMS_KEY]: [
+      {
+        id: "pending-selection",
+        title: "Selection",
+        subtitle: "Article title · docs.example.com",
+        text: "Selected body text",
+        createdAt: 1
+      }
+    ]
+  };
+  const copiedTexts = [];
+
+  globalThis.HTMLElement = FakeElement;
+  globalThis.Element = FakeElement;
+  globalThis.Node = FakeElement;
+  globalThis.HTMLButtonElement = FakeButtonElement;
+  globalThis.HTMLDetailsElement = FakeElement;
+  globalThis.HTMLIFrameElement = FakeIFrameElement;
+  globalThis.HTMLInputElement = FakeInputElement;
+  globalThis.HTMLImageElement = FakeImageElement;
+  globalThis.HTMLTableSectionElement = FakeElement;
+  globalThis.document = document;
+  globalThis.localStorage = createLocalStorage();
+  globalThis.sessionStorage = createLocalStorage();
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    writable: true,
+    value: {
+      clipboard: {
+        async writeText(text) {
+          copiedTexts.push(text);
+        }
+      }
+    }
+  });
+  globalThis.window = {
+    location: { search: "" },
+    addEventListener() {},
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    setInterval: scheduler.setInterval,
+    clearInterval: scheduler.clearInterval
+  };
+  globalThis.chrome = createChromeMock(storageData, sessionData);
+
+  try {
+    await import(`../dist/sidepanel/main.js?shelf-drain-${Date.now()}`);
+    await flushAsync();
+
+    assert.equal(sessionData[PENDING_CONTEXT_SHELF_ITEMS_KEY], undefined);
+    assert.equal(document.getElementById("contextShelfPanel").hidden, false);
+    assert.equal(document.getElementById("copyShelfButton").disabled, false);
+    assert.match(textTree(document.getElementById("contextShelfList")), /Selected body text/);
+
+    document.getElementById("copyShelfButton").dispatch("click");
+    await flushAsync();
+
+    assert.equal(copiedTexts.length, 1);
+    assert.match(copiedTexts[0], /#1 Selection/);
+    assert.match(copiedTexts[0], /Article title · docs\.example\.com/);
+    assert.match(copiedTexts[0], /Selected body text/);
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.document;
+    delete globalThis.localStorage;
+    delete globalThis.sessionStorage;
+    delete globalThis.navigator;
+    delete globalThis.window;
+    delete globalThis.HTMLElement;
+    delete globalThis.Element;
+    delete globalThis.Node;
+    delete globalThis.HTMLButtonElement;
+    delete globalThis.HTMLDetailsElement;
+    delete globalThis.HTMLIFrameElement;
+    delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLImageElement;
+    delete globalThis.HTMLTableSectionElement;
+  }
+});
+
 test("side panel header and footer chrome collapse and persist", async () => {
   const scheduler = createScheduler();
   const document = createSidepanelDocument();
@@ -663,6 +841,12 @@ function createSidepanelDocument() {
     "contextActions",
     "promptPalette",
     "promptList",
+    "contextShelfPanel",
+    "contextShelfTitle",
+    "contextShelfList",
+    "promptDraftPanel",
+    "promptDraftTitle",
+    "templateVariableList",
     "diagnosticsDetails",
     "diagnosticsTable"
   ];
@@ -675,6 +859,16 @@ function createSidepanelDocument() {
     "composerLauncherButton",
     "contextButton",
     "promptButton",
+    "addContextToShelfButton",
+    "sendContextToDraftButton",
+    "shelfButton",
+    "draftButton",
+    "copyShelfButton",
+    "clearShelfButton",
+    "tryDraftButton",
+    "insertDraftButton",
+    "copyDraftButton",
+    "clearDraftButton",
     "fallbackOpenTabButton",
     "fallbackOpenWindowButton",
     "fallbackReloadButton",
@@ -688,6 +882,8 @@ function createSidepanelDocument() {
     document.register(new FakeButtonElement(id, document));
   }
   document.register(new FakeInputElement("promptSearchInput", document));
+  document.register(new FakeInputElement("promptDraftTextarea", document));
+  document.register(new FakeInputElement("draftTargetSelect", document));
   document.getElementById("frameDeck").append(document.register(new FakeIFrameElement("aiFrame", document)));
   for (const id of [
     "statusBanner",
@@ -700,6 +896,8 @@ function createSidepanelDocument() {
     "serviceMenu",
     "contextPopover",
     "promptPalette",
+    "contextShelfPanel",
+    "promptDraftPanel",
     "diagnosticsDetails"
   ]) {
     document.getElementById(id).hidden = true;
@@ -707,7 +905,22 @@ function createSidepanelDocument() {
   return document;
 }
 
-function createChromeMock(storageData) {
+function createChromeMock(storageData, sessionData = {}) {
+  const makeStorageArea = (data) => ({
+    async get(keys) {
+      const keyList = Array.isArray(keys) ? keys : [keys];
+      return Object.fromEntries(keyList.map((key) => [key, data[key]]));
+    },
+    async set(values) {
+      Object.assign(data, values);
+    },
+    async remove(keys) {
+      const keyList = Array.isArray(keys) ? keys : [keys];
+      for (const key of keyList) {
+        delete data[key];
+      }
+    }
+  });
   return {
     runtime: {
       openOptionsPage() {},
@@ -717,21 +930,8 @@ function createChromeMock(storageData) {
     },
     storage: {
       onChanged: { addListener() {} },
-      local: {
-        async get(keys) {
-          const keyList = Array.isArray(keys) ? keys : [keys];
-          return Object.fromEntries(keyList.map((key) => [key, storageData[key]]));
-        },
-        async set(values) {
-          Object.assign(storageData, values);
-        },
-        async remove(keys) {
-          const keyList = Array.isArray(keys) ? keys : [keys];
-          for (const key of keyList) {
-            delete storageData[key];
-          }
-        }
-      }
+      local: makeStorageArea(storageData),
+      session: makeStorageArea(sessionData)
     },
     tabs: {
       async create() {}
@@ -945,6 +1145,12 @@ class FakeElement {
       return this;
     }
     if (selector === "button[data-mode]" && this instanceof FakeButtonElement && this.dataset.mode) {
+      return this;
+    }
+    if (selector === "button[data-shelf-action][data-shelf-id]" && this instanceof FakeButtonElement && this.dataset.shelfAction && this.dataset.shelfId) {
+      return this;
+    }
+    if (selector === "button[data-template-var]" && this instanceof FakeButtonElement && this.dataset.templateVar) {
       return this;
     }
     if (selector === "[data-template-id]" && this.dataset.templateId) {
