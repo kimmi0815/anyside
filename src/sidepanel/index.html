@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>anyside</title>
+    <link rel="stylesheet" href="../shared/tokens.css">
     <link rel="stylesheet" href="./sidepanel.css">
   </head>
   <body>
@@ -101,19 +102,16 @@
 
         <section id="setupPanel" class="fallback setup-state" hidden>
           <div class="fallback-content">
-            <h2>Choose a service in Options.</h2>
-            <p>anyside keeps the side panel focused on one configured service. Pick a built-in service or saved custom URL in Options.</p>
+            <h2>Choose a service in Settings.</h2>
+            <p>anyside keeps the side panel focused on one configured service. Pick a built-in service or saved custom URL in Settings.</p>
             <div class="fallback-actions">
-              <button id="setupOptionsButton" class="button primary" type="button">Open Options</button>
+              <button id="setupOptionsButton" class="button primary" type="button">Open Settings</button>
             </div>
           </div>
         </section>
       </section>
 
       <section id="composerToolbar" class="composer-toolbar" aria-label="Prompt and context tools" data-expanded="false">
-        <button id="composerLauncherButton" class="composer-launcher-button" type="button" aria-label="Open prompt and context tools" aria-expanded="false" title="Prompt and context tools">
-          <span aria-hidden="true">✦</span>
-        </button>
         <div id="composerActions" class="composer-actions">
           <button id="contextButton" class="composer-button" type="button" aria-haspopup="menu" aria-expanded="false" title="Add page context">
             <span class="composer-button-icon" aria-hidden="true">＋</span>

@@ -73,10 +73,6 @@ test("side panel hides fallback when the iframe loads after the normal timeout",
 
     const composerToolbar = document.getElementById("composerToolbar");
     assert.equal(composerToolbar.dataset.expanded, "false");
-    document.getElementById("composerLauncherButton").dispatch("click");
-    assert.equal(composerToolbar.dataset.expanded, "true");
-    document.dispatch("keydown", { key: "Escape" });
-    assert.equal(composerToolbar.dataset.expanded, "false");
 
     scheduler.runByDelay(0);
     const frame = document.getElementById("aiFrame");
@@ -161,7 +157,6 @@ test("side panel prompt palette includes custom prompt templates from storage", 
     await import(`../dist/sidepanel/main.js?custom-prompts-${Date.now()}`);
     await flushAsync();
 
-    document.getElementById("composerLauncherButton").dispatch("click");
     document.getElementById("promptButton").dispatch("click");
     await flushAsync();
 
@@ -283,7 +278,7 @@ test("side panel service switcher loads registered services and custom URLs", as
     );
     assert.equal(document.getElementById("serviceSwitcher").children[0].dataset.presetId, "claude");
     assert.equal(document.getElementById("moreActionsButton").hidden, false);
-    assert.equal(document.getElementById("moreActionsButton").attributes["aria-label"], "Open settings");
+    assert.equal(document.getElementById("moreActionsButton").attributes["aria-label"], "Open Settings");
     assert.equal(document.getElementById("headerReloadButton").attributes["aria-label"], "Reload current service");
     assert.deepEqual(runtimeMessages[0], {
       type: "START_FRAME_COMPATIBILITY_SESSION",
@@ -1147,7 +1142,6 @@ function createSidepanelDocument() {
     "footerChromeToggleButton",
     "moreActionsButton",
     "hideServiceButton",
-    "composerLauncherButton",
     "contextButton",
     "promptButton",
     "addContextToShelfButton",

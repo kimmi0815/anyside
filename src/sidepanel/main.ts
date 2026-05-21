@@ -68,7 +68,6 @@ const setupPanel = element<HTMLElement>("setupPanel");
 const setupOptionsButton = element<HTMLButtonElement>("setupOptionsButton");
 const composerToast = element<HTMLElement>("composerToast");
 const composerToolbar = element<HTMLElement>("composerToolbar");
-const composerLauncherButton = element<HTMLButtonElement>("composerLauncherButton");
 const composerActions = element<HTMLElement>("composerActions");
 const contextButton = element<HTMLButtonElement>("contextButton");
 const promptButton = element<HTMLButtonElement>("promptButton");
@@ -145,7 +144,6 @@ let draftChangeFromThisPanel = false;
 let draftTargetChangeFromThisPanel = false;
 let toastTimer: number | undefined;
 let toastExitTimer: number | undefined;
-let composerCollapsed = true;
 let promptTemplates: PromptTemplate[] = [...PROMPT_TEMPLATES];
 let draggedServiceId: ActivePresetId | null = null;
 let menuServiceId: ActivePresetId | null = null;
@@ -339,14 +337,6 @@ function bindEvents(): void {
 }
 
 function bindComposerEvents(): void {
-  composerLauncherButton.addEventListener("click", (event) => {
-    event.stopPropagation();
-    if (!composerCollapsed) {
-      closeComposerMenus();
-      return;
-    }
-    setComposerExpanded(true);
-  });
   contextButton.addEventListener("click", (event) => {
     event.stopPropagation();
     void toggleContextPopover();
@@ -482,9 +472,7 @@ function bindComposerEvents(): void {
 
 function setComposerExpanded(expanded: boolean): void {
   const nextExpanded = expanded && !settings.sidePanelChrome.footerCollapsed;
-  composerCollapsed = !nextExpanded;
   composerToolbar.dataset.expanded = nextExpanded ? "true" : "false";
-  composerLauncherButton.setAttribute("aria-expanded", nextExpanded ? "true" : "false");
   composerActions.setAttribute("aria-hidden", settings.sidePanelChrome.footerCollapsed ? "true" : "false");
 }
 
@@ -2298,14 +2286,12 @@ function localizeStaticUi(): void {
   fallbackTitleSuffix.textContent = uiLanguage === "ja" ? tr("side.fallbackSuffix") : ` ${tr("side.fallbackSuffix")}`;
   fallbackReason.textContent = fallbackPanel.hidden ? fallbackReason.textContent : defaultFallbackReason();
   fallbackNote.textContent = tr("side.fallbackNote");
-  setupOptionsButton.textContent = tr("common.openOptions");
+  setupOptionsButton.textContent = tr("common.openSettings");
   const setupTitle = typeof setupPanel.querySelector === "function" ? setupPanel.querySelector("h2") : null;
   const setupCopy = typeof setupPanel.querySelector === "function" ? setupPanel.querySelector("p") : null;
   if (setupTitle) setupTitle.textContent = tr("side.setupTitle");
   if (setupCopy) setupCopy.textContent = tr("side.setupCopy");
   composerToolbar.setAttribute("aria-label", tr("side.composerTools"));
-  composerLauncherButton.title = tr("side.composerTools");
-  composerLauncherButton.setAttribute("aria-label", tr("side.openComposerTools"));
   contextButton.title = tr("side.addPageContext");
   const contextLabel = typeof contextButton.querySelector === "function" ? contextButton.querySelector(".composer-button-label") : null;
   if (contextLabel) contextLabel.textContent = tr("side.context");

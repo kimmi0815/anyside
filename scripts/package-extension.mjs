@@ -10,6 +10,7 @@ export const RELEASE_INCLUDED_PATHS = [
   "src/sidepanel/sidepanel.css",
   "src/options/index.html",
   "src/options/options.css",
+  "src/shared/tokens.css",
   "src/offscreen/clipboard.html",
   "rules",
   "assets",

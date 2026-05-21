@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>anyside Options</title>
+    <title>anyside Settings</title>
+    <link rel="stylesheet" href="../shared/tokens.css">
     <link rel="stylesheet" href="./options.css">
   </head>
   <body>
@@ -13,7 +14,7 @@
           <img class="brand-mark" src="../../assets/brand/anyside-logo.png" alt="" aria-hidden="true">
           <span class="brand-text">
             <span class="brand-name">anyside</span>
-            <span class="brand-tag" data-i18n="options.brandTag">Options</span>
+            <span class="brand-tag" data-i18n="options.brandTag">Settings</span>
           </span>
         </a>
 
@@ -40,15 +41,9 @@
       </aside>
 
       <main class="content" id="top">
-        <header class="hero">
-          <h1 data-i18n="options.settings">Settings</h1>
-          <p data-i18n="options.heroCopy">Manage quick access services, custom URLs, and your prompt library.</p>
-        </header>
-
         <section id="services" class="card">
           <div class="card-head">
             <h2 data-i18n="options.services">Services</h2>
-            <p data-i18n="options.servicesCopy">Choose which services appear in the side panel header. Add trusted custom AI workspaces below.</p>
           </div>
 
           <div id="hiddenServiceList" class="hidden-service-list"></div>
@@ -56,7 +51,6 @@
           <div class="custom-url-section">
             <div class="subsection-head">
               <h3 data-i18n="options.customUrls">Custom URLs</h3>
-              <p data-i18n="options.customUrlsCopy">Add trusted AI workspaces or local test pages.</p>
             </div>
 
             <form id="customUrlForm" class="custom-form" novalidate>
@@ -127,7 +121,6 @@
         <section id="about" class="card about-card">
           <div class="card-head">
             <h2 data-i18n="options.about">About</h2>
-            <p data-i18n="options.aboutCopy">anyside keeps your chosen AI services and custom AI workspaces in Chrome's Side Panel.</p>
           </div>
           <dl class="about-meta">
             <div>
