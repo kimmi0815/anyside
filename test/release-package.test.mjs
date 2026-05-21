@@ -136,6 +136,32 @@ test("release packaging excludes generated metadata and development-only folders
   }
 });
 
+test("release packaging removes stale versioned zips for the same package", async (t) => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "anyside-stale-release-"));
+  t.after(() => rm(tempRoot, { recursive: true, force: true }));
+
+  await createPackageFixture(tempRoot, { name: "anyside", version: "0.2.0" });
+
+  const releaseDir = join(tempRoot, "release");
+  await mkdir(releaseDir, { recursive: true });
+  await writeFile(join(releaseDir, "anyside-0.1.0.zip"), "stale");
+  await writeFile(join(releaseDir, "anyside-0.2.0.zip"), "old current");
+  await writeFile(join(releaseDir, "other-0.1.0.zip"), "keep");
+
+  const zipPath = await packageExtension(tempRoot);
+
+  assert.equal(await exists(join(releaseDir, "anyside-0.1.0.zip")), false);
+  assert.equal(await exists(join(releaseDir, "anyside-0.2.0.zip")), true);
+  assert.equal(await exists(join(releaseDir, "other-0.1.0.zip")), true);
+  assert.equal(zipPath, join(releaseDir, "anyside-0.2.0.zip"));
+});
+
+test("side panel composer popovers cap their minimum height to the viewport", async () => {
+  const source = await readFile(join(root, "src/sidepanel/sidepanel.css"), "utf8");
+
+  assert.match(source, /min-height:\s*min\(240px,\s*calc\(100% - 24px\)\);/);
+});
+
 function collectManifestPaths(manifest) {
   const paths = new Set();
   addPath(paths, manifest.background?.service_worker);
@@ -193,6 +219,29 @@ async function createBuildFixture(t) {
   await cp(join(root, "tsconfig.json"), join(tempRoot, "tsconfig.json"));
 
   return tempRoot;
+}
+
+async function createPackageFixture(tempRoot, packageJson) {
+  await writeFile(join(tempRoot, "package.json"), JSON.stringify(packageJson));
+
+  for (const filePath of [
+    "manifest.json",
+    "README.md",
+    "src/sidepanel/index.html",
+    "src/sidepanel/sidepanel.css",
+    "src/options/index.html",
+    "src/options/options.css",
+    "src/shared/tokens.css",
+    "src/offscreen/clipboard.html"
+  ]) {
+    await mkdir(dirname(join(tempRoot, filePath)), { recursive: true });
+    await writeFile(join(tempRoot, filePath), `${filePath}\n`);
+  }
+
+  for (const directoryPath of ["dist", "rules", "assets"]) {
+    await mkdir(join(tempRoot, directoryPath), { recursive: true });
+    await writeFile(join(tempRoot, directoryPath, ".keep"), "");
+  }
 }
 
 async function compileBundle(cwd, buildArgs = []) {

@@ -121,10 +121,28 @@ test("options renders custom prompt templates under category groups", async () =
     assert.equal(findAllByClass(document.getElementById("promptTemplateList"), "prompt-category-items")[0].hidden, false);
 
     const categoryInput = document.getElementById("promptCategoryInput");
+    assert.equal(categoryInput.attributes.role, "combobox");
+    assert.equal(categoryInput.attributes["aria-autocomplete"], "list");
+    assert.equal(categoryInput.attributes["aria-haspopup"], "listbox");
+    assert.equal(categoryInput.attributes["aria-expanded"], "false");
+
     categoryInput.dispatch("focus");
     const combobox = document.getElementById("promptCategoryCombobox");
+    assert.equal(categoryInput.attributes["aria-expanded"], "true");
+    assert.equal(categoryInput.attributes["aria-controls"], "promptCategoryCombobox-panel");
+
     const comboboxOptions = findAllByClass(combobox, "category-combobox-option");
     assert.deepEqual(comboboxOptions.map((option) => option.textContent), ["Research", "Writing"]);
+    assert.deepEqual(comboboxOptions.map((option) => option.attributes["aria-selected"]), ["false", "false"]);
+
+    categoryInput.dispatch("keydown", { key: "ArrowDown" });
+    assert.equal(categoryInput.attributes["aria-activedescendant"], comboboxOptions[0].id);
+    assert.equal(comboboxOptions[0].attributes["aria-selected"], "true");
+
+    categoryInput.dispatch("keydown", { key: "Enter" });
+    assert.equal(categoryInput.value, "Research");
+    assert.equal(categoryInput.attributes["aria-expanded"], "false");
+    assert.equal(categoryInput.attributes["aria-activedescendant"], undefined);
 
     const expandedGroups = findAllByClass(document.getElementById("promptTemplateList"), "prompt-category-group");
     assert.equal(findAllByClass(groups[0], "entry").length, 2);
@@ -137,6 +155,51 @@ test("options renders custom prompt templates under category groups", async () =
     assert.equal(findByDataset(expandedGroups[0], "entryId", "custom:research-a")?.dataset.entryId, "custom:research-a");
     assert.equal(findByDataset(expandedGroups[0], "entryId", "custom:research-b")?.dataset.entryId, "custom:research-b");
     assert.equal(findByDataset(expandedGroups[1], "entryId", "custom:writing-c")?.dataset.entryId, "custom:writing-c");
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.document;
+    delete globalThis.HTMLElement;
+    delete globalThis.HTMLButtonElement;
+    delete globalThis.HTMLFormElement;
+    delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLImageElement;
+    delete globalThis.IntersectionObserver;
+  }
+});
+
+test("options refreshes category combobox labels after language changes", async () => {
+  const document = createOptionsDocument();
+  const storageData = {
+    "anyside.settings": createSettings({ language: "en" }),
+    "composer.promptTemplates": []
+  };
+
+  globalThis.HTMLElement = FakeElement;
+  globalThis.HTMLButtonElement = FakeButtonElement;
+  globalThis.HTMLFormElement = FakeFormElement;
+  globalThis.HTMLInputElement = FakeInputElement;
+  globalThis.HTMLImageElement = FakeImageElement;
+  globalThis.document = document;
+  globalThis.chrome = createChromeMock(storageData);
+  globalThis.IntersectionObserver = class {
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+  };
+
+  try {
+    await import(`../dist/options/main.js?category-language-${Date.now()}`);
+    await flushAsync();
+
+    const chevron = findAllByClass(document.getElementById("promptCategoryCombobox"), "category-combobox-chevron")[0];
+    assert.equal(chevron.attributes["aria-label"], "Open category list");
+
+    const languageSelect = document.getElementById("languageSelect");
+    languageSelect.value = "ja";
+    languageSelect.dispatch("change");
+    await flushAsync();
+
+    assert.equal(chevron.attributes["aria-label"], "カテゴリ一覧を開く");
   } finally {
     delete globalThis.chrome;
     delete globalThis.document;
@@ -258,6 +321,13 @@ function findAllByClass(element, className) {
   return matches;
 }
 
+function matchesSelector(element, selector) {
+  if (selector === "[data-category-combobox-chevron]") {
+    return Boolean(element.dataset?.categoryComboboxChevron);
+  }
+  return false;
+}
+
 class FakeDocument {
   elements = {};
 
@@ -288,6 +358,26 @@ class FakeDocument {
 
   createElementNS(_namespace, tagName) {
     return this.createElement(tagName);
+  }
+
+  querySelectorAll(selector) {
+    const matches = [];
+    const visit = (element) => {
+      if (matchesSelector(element, selector)) {
+        matches.push(element);
+      }
+      for (const child of element.children ?? []) {
+        if (child && typeof child === "object") {
+          visit(child);
+        }
+      }
+    };
+
+    for (const element of Object.values(this.elements)) {
+      visit(element);
+    }
+
+    return [...new Set(matches)];
   }
 }
 
@@ -335,8 +425,16 @@ class FakeElement {
     }
   }
 
+  click() {
+    this.dispatch("click");
+  }
+
   setAttribute(name, value) {
     this.attributes[name] = String(value);
+  }
+
+  removeAttribute(name) {
+    delete this.attributes[name];
   }
 
   closest(selector) {

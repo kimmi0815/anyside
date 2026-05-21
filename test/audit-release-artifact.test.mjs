@@ -80,6 +80,17 @@ test("release artifact audit rejects forbidden archive contents and unsafe code"
   assert.ok(result.errors.some((error) => error.includes("innerHTML")));
 });
 
+test("release artifact audit rejects a stale manifest version when expected", async (t) => {
+  const { stagingDir, zipPath } = await createZipFixture(t);
+  await writeFixtureFile(stagingDir, "manifest.json", JSON.stringify({ version: "0.1.0" }));
+
+  await zipDirectory(stagingDir, zipPath);
+
+  const result = await auditReleaseArtifact(zipPath, { expectedVersion: "0.2.0", throwOnFailure: false });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("does not match package version 0.2.0")));
+});
+
 async function createZipFixture(t) {
   const tempRoot = await mkdtemp(join(tmpdir(), "anyside-audit-"));
   t.after(() => rm(tempRoot, { recursive: true, force: true }));

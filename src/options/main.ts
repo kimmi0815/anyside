@@ -267,6 +267,7 @@ function localizeStaticUi(): void {
     document.documentElement.lang = uiLanguage;
   }
   document.title = tr("options.title");
+  updateCategoryComboboxLabels();
   if (typeof document.querySelectorAll !== "function") {
     return;
   }
@@ -283,6 +284,16 @@ function localizeStaticUi(): void {
         node.setAttribute(attr, tr(key));
       }
     }
+  }
+}
+
+function updateCategoryComboboxLabels(): void {
+  if (typeof document.querySelectorAll !== "function") {
+    return;
+  }
+
+  for (const node of Array.from(document.querySelectorAll<HTMLElement>("[data-category-combobox-chevron]"))) {
+    node.setAttribute("aria-label", tr("options.openCategoryList"));
   }
 }
 
@@ -364,16 +375,23 @@ function promptTemplateCategories(): string[] {
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+let categoryComboboxId = 0;
 
 function attachCategoryCombobox(
   wrapper: HTMLElement,
   input: HTMLInputElement,
   getOptions: () => string[]
 ): void {
+  const idBase = wrapper.id || `category-combobox-${++categoryComboboxId}`;
+  if (!wrapper.id) {
+    wrapper.id = idBase;
+  }
+
   const chevron = document.createElement("button");
   chevron.className = "category-combobox-chevron";
   chevron.type = "button";
   chevron.tabIndex = -1;
+  chevron.dataset.categoryComboboxChevron = "true";
   chevron.setAttribute("aria-label", tr("options.openCategoryList"));
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
@@ -385,8 +403,15 @@ function attachCategoryCombobox(
 
   const panel = document.createElement("div");
   panel.className = "category-combobox-panel";
+  panel.id = `${idBase}-panel`;
   panel.hidden = true;
   panel.setAttribute("role", "listbox");
+
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-haspopup", "listbox");
+  input.setAttribute("aria-expanded", "false");
+  input.setAttribute("aria-controls", panel.id);
 
   wrapper.append(chevron, panel);
 
@@ -415,9 +440,11 @@ function attachCategoryCombobox(
     filtered.forEach((category, index) => {
       const button = document.createElement("button");
       button.className = "category-combobox-option";
+      button.id = `${idBase}-option-${index}`;
       button.type = "button";
       button.tabIndex = -1;
       button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", "false");
       button.textContent = category;
       button.dataset.index = String(index);
       button.addEventListener("mousedown", (event) => {
@@ -437,10 +464,16 @@ function attachCategoryCombobox(
     optionButtons.forEach((button, index) => {
       if (index === activeIndex) {
         button.dataset.active = "true";
+        button.setAttribute("aria-selected", "true");
+        input.setAttribute("aria-activedescendant", button.id);
       } else {
         delete button.dataset.active;
+        button.setAttribute("aria-selected", "false");
       }
     });
+    if (activeIndex < 0) {
+      input.removeAttribute("aria-activedescendant");
+    }
   }
 
   function openPanel(): void {
@@ -450,7 +483,9 @@ function attachCategoryCombobox(
     open = true;
     wrapper.dataset.open = "true";
     panel.hidden = false;
+    input.setAttribute("aria-expanded", "true");
     renderOptions();
+    syncActive();
   }
 
   function closePanel(): void {
@@ -461,6 +496,8 @@ function attachCategoryCombobox(
     activeIndex = -1;
     delete wrapper.dataset.open;
     panel.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
   }
 
   input.addEventListener("focus", () => {
@@ -475,6 +512,7 @@ function attachCategoryCombobox(
     activeIndex = -1;
     if (open) {
       renderOptions();
+      syncActive();
     } else {
       openPanel();
     }

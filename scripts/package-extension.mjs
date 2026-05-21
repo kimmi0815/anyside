@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -32,7 +32,9 @@ export async function packageExtension(root = process.cwd()) {
   const stagingDir = join(releaseDir, "extension");
   const zipPath = join(releaseDir, `${packageJson.name}-${packageJson.version}.zip`);
 
+  await mkdir(releaseDir, { recursive: true });
   await rm(stagingDir, { recursive: true, force: true });
+  await removeStaleReleaseZips(releaseDir, basename(zipPath), packageJson.name);
   await rm(zipPath, { force: true });
   await mkdir(stagingDir, { recursive: true });
 
@@ -47,6 +49,22 @@ export async function packageExtension(root = process.cwd()) {
   await rm(stagingDir, { recursive: true, force: true });
 
   return zipPath;
+}
+
+async function removeStaleReleaseZips(releaseDir, currentZipName, packageName) {
+  const releaseEntries = await readdir(releaseDir, { withFileTypes: true });
+  const releaseZipPrefix = `${packageName}-`;
+
+  for (const entry of releaseEntries) {
+    if (
+      entry.isFile() &&
+      entry.name !== currentZipName &&
+      entry.name.startsWith(releaseZipPrefix) &&
+      entry.name.endsWith(".zip")
+    ) {
+      await rm(join(releaseDir, entry.name), { force: true });
+    }
+  }
 }
 
 if (isMainModule()) {

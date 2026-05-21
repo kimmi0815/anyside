@@ -76,6 +76,8 @@ export async function auditReleaseArtifact(zipPath, options = {}) {
 
   if (!entries.includes("manifest.json")) {
     errors.push("manifest.json must be at the zip root");
+  } else if (options.expectedVersion) {
+    await auditManifestVersion(zipPath, options.expectedVersion, errors);
   }
 
   for (const entry of entries) {
@@ -95,6 +97,17 @@ export async function auditReleaseArtifact(zipPath, options = {}) {
   }
 
   return { ok: true, errors: [], entries };
+}
+
+async function auditManifestVersion(zipPath, expectedVersion, errors) {
+  try {
+    const manifest = JSON.parse(await readZipEntry(zipPath, "manifest.json"));
+    if (manifest.version !== expectedVersion) {
+      errors.push(`manifest.json version ${manifest.version ?? "(missing)"} does not match package version ${expectedVersion}`);
+    }
+  } catch (error) {
+    errors.push(`manifest.json could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function auditEntryPath(entry, errors) {
@@ -181,6 +194,14 @@ export function defaultZipPath(root = process.cwd()) {
     });
 }
 
+export function defaultAuditOptions(root = process.cwd()) {
+  return readFile(join(root, "package.json"), "utf8")
+    .then((source) => {
+      const packageJson = JSON.parse(source);
+      return { expectedVersion: packageJson.version };
+    });
+}
+
 async function listZipEntries(zipPath) {
   const stdout = await runCommand("zipinfo", ["-1", zipPath]);
   return stdout.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
@@ -216,7 +237,7 @@ function runCommand(command, args) {
 
 if (isMainModule()) {
   const zipPath = process.argv[2] ?? await defaultZipPath();
-  await auditReleaseArtifact(zipPath);
+  await auditReleaseArtifact(zipPath, await defaultAuditOptions());
   console.log(`Audited ${zipPath}`);
 }
 
