@@ -37,9 +37,9 @@ test("DNR compatibility request domains match built-in frame compatibility domai
   assert.equal(requestDomains.includes("www.perplexity.ai"), true);
 });
 
-test("side panel iframe does not delegate clipboard permissions", async () => {
+test("side panel iframe delegates clipboard write but not clipboard read", async () => {
   const html = await readFile(join(root, "src/sidepanel/index.html"), "utf8");
 
   assert.doesNotMatch(html, /clipboard-read/);
-  assert.doesNotMatch(html, /clipboard-write/);
+  assert.match(html, /allow="clipboard-write"/);
 });

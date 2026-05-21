@@ -108,7 +108,7 @@ For the public privacy summary, see [`PRIVACY.md`](PRIVACY.md). For release perm
 - When an AI input page is connected, anyside may insert that user-requested text into the visible AI input field; otherwise it falls back to copying the text.
 - It does not auto-submit prompts.
 - The context menu only creates a prompt and copies it to your clipboard after a user action.
-- The embedded iframe does not receive delegated `clipboard-read` or `clipboard-write` permissions from anyside. Extension-initiated clipboard writes use the extension/offscreen helper instead.
+- The embedded iframe receives delegated `clipboard-write` permission so AI page copy buttons can work. It does not receive delegated `clipboard-read` permission. Extension-initiated clipboard writes use the extension/offscreen helper instead.
 
 ## Files
 

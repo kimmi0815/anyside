@@ -12,6 +12,7 @@ const LOAD_TIMEOUT_MS = 8000;
 const TOAST_MS = 2200;
 const TOAST_EXIT_MS = 180;
 const RECENT_PROMPTS_KEY = "composer.recentPromptTemplateIds";
+const AI_FRAME_ALLOW = "clipboard-write";
 const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
   chatgpt: "../../assets/service-icons/chatgpt.png",
   gemini: "../../assets/service-icons/gemini.png",
@@ -907,10 +908,7 @@ function activateFrameForLoad(
 
 function createFrameForLoad(token: number, expectedUrl: string): HTMLIFrameElement {
   const nextFrame = reusableInitialFrame() ?? document.createElement("iframe");
-  nextFrame.id = "";
-  nextFrame.title = "AI service";
-  nextFrame.tabIndex = 0;
-  nextFrame.referrerPolicy = "strict-origin-when-cross-origin";
+  configureAIFrame(nextFrame, "");
   nextFrame.src = "about:blank";
   nextFrame.hidden = true;
   nextFrame.addEventListener("load", () => {
@@ -923,6 +921,14 @@ function createFrameForLoad(token: number, expectedUrl: string): HTMLIFrameEleme
     frameDeck.append(nextFrame);
   }
   return nextFrame;
+}
+
+function configureAIFrame(frame: HTMLIFrameElement, id: string): void {
+  frame.id = id;
+  frame.title = "AI service";
+  frame.tabIndex = 0;
+  frame.referrerPolicy = "strict-origin-when-cross-origin";
+  frame.setAttribute("allow", AI_FRAME_ALLOW);
 }
 
 function reusableInitialFrame(): HTMLIFrameElement | undefined {
@@ -996,10 +1002,7 @@ function clearPreservedFrames(): void {
   aiFrame.remove();
 
   const blankFrame = document.createElement("iframe");
-  blankFrame.id = "aiFrame";
-  blankFrame.title = "AI service";
-  blankFrame.tabIndex = 0;
-  blankFrame.referrerPolicy = "strict-origin-when-cross-origin";
+  configureAIFrame(blankFrame, "aiFrame");
   blankFrame.src = "about:blank";
   frameDeck.append(blankFrame);
   aiFrame = blankFrame;
