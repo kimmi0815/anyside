@@ -113,7 +113,7 @@ For the public privacy summary, see [`PRIVACY.md`](PRIVACY.md). For release perm
 
 - anyside does not send browsing content to any external server of its own.
 - Context and Prompt actions run only after a user action, then use the active tab title, URL, selected text, and, for explicitly body-aware actions/templates only, extracted page text and headings to build the requested text.
-- Context Shelf and Prompt Draft are session-only browser-side state. They are not persisted as extension settings.
+- Context Shelf items, Prompt Draft text, and the Prompt Draft target service live in `chrome.storage.session`. They persist for the current browser session (across side-panel reopens) and are not persisted as extension settings.
 - When an AI input page is connected, anyside may insert that user-requested text into the visible AI input field; otherwise it falls back to copying the text.
 - It does not auto-submit prompts.
 - The context menu can create a prompt and copy it to your clipboard, or add the current selection to the session-only Context Shelf, after a user action.

@@ -4,7 +4,16 @@ import { BUILT_IN_PRESETS, FRAME_COMPATIBILITY_DOMAINS, diagnosticKey, isBuiltIn
 import { getSettings, normalizeSettings, saveSettings, SETTINGS_KEY } from "../shared/storage.js";
 import { CUSTOM_PROMPT_TEMPLATES_KEY, getCustomPromptTemplates } from "../storage/promptTemplateStorage.js";
 import { resolveLanguage, t, type ResolvedLanguage } from "../shared/i18n.js";
-import { PENDING_CONTEXT_SHELF_ITEMS_KEY, normalizePendingContextShelfItems } from "../shared/contextShelfSession.js";
+import {
+  CONTEXT_SHELF_ITEM_LIMIT,
+  CONTEXT_SHELF_ITEMS_KEY,
+  PENDING_CONTEXT_SHELF_ITEMS_KEY,
+  PROMPT_DRAFT_KEY,
+  PROMPT_DRAFT_TARGET_KEY,
+  UNCATEGORIZED_CATEGORY_KEY,
+  normalizePendingContextShelfItems,
+  normalizeStoredContextShelfItems
+} from "../shared/contextShelfSession.js";
 import type { AIService, ContextMode, PageContext, PromptTemplate } from "../features/composer/types.js";
 import type { ActivePresetId, DiagnosticEntry, DiagnosticStatus, PresetId, RuntimeMessage, RuntimeResponse, Settings } from "../shared/types.js";
 
@@ -13,10 +22,6 @@ const LOAD_TIMEOUT_MS = 8000;
 const TOAST_MS = 2200;
 const TOAST_EXIT_MS = 180;
 const RECENT_PROMPTS_KEY = "composer.recentPromptTemplateIds";
-const CONTEXT_SHELF_KEY = "composer.contextShelfItems";
-const PROMPT_DRAFT_KEY = "composer.promptDraft";
-const PROMPT_DRAFT_TARGET_KEY = "composer.promptDraftTarget";
-const CONTEXT_SHELF_LIMIT = 20;
 const DRAFT_TRY_LOAD_WAIT_MS = 2600;
 const AI_FRAME_ALLOW = "clipboard-write";
 const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
@@ -131,7 +136,13 @@ let activeFrameCompatibilitySessionId: string | undefined;
 let lastContext: PageContext | null = null;
 let promptQuery = "";
 let activePromptIndex = 0;
-const expandedPromptCategories = new Set<string>();
+const collapsedPromptCategories = new Set<string>();
+let promptDraftTarget = "";
+let lastClearedShelfItems: ContextShelfItem[] | null = null;
+let pendingShelfDrainPromise: Promise<void> | null = null;
+let shelfChangeFromThisPanel = false;
+let draftChangeFromThisPanel = false;
+let draftTargetChangeFromThisPanel = false;
 let toastTimer: number | undefined;
 let toastExitTimer: number | undefined;
 let composerCollapsed = true;
@@ -148,8 +159,14 @@ async function init(): Promise<void> {
   diagnosticsDetails.hidden = !diagnosticsEnabled;
   settings = await getSettings();
   uiLanguage = resolveUiLanguage();
-  contextShelfItems = readContextShelfItems();
-  promptDraftTextarea.value = readPromptDraft();
+  const [storedShelfItems, storedDraft, storedDraftTarget] = await Promise.all([
+    readContextShelfItems(),
+    readPromptDraft(),
+    readPromptDraftTarget()
+  ]);
+  contextShelfItems = storedShelfItems;
+  promptDraftTextarea.value = storedDraft;
+  promptDraftTarget = storedDraftTarget;
   await loadPromptTemplates();
   syncSettingsUi();
   bindEvents();
@@ -235,6 +252,21 @@ function bindEvents(): void {
     if (areaName === "session") {
       if (changes[PENDING_CONTEXT_SHELF_ITEMS_KEY]?.newValue) {
         void drainPendingContextShelfItems();
+      }
+      if (changes[CONTEXT_SHELF_ITEMS_KEY] && !shelfChangeFromThisPanel) {
+        contextShelfItems = normalizeStoredContextShelfItems(changes[CONTEXT_SHELF_ITEMS_KEY].newValue);
+        renderContextShelf();
+      }
+      if (changes[PROMPT_DRAFT_KEY] && !draftChangeFromThisPanel) {
+        const incoming = changes[PROMPT_DRAFT_KEY].newValue;
+        promptDraftTextarea.value = typeof incoming === "string" ? incoming : "";
+      }
+      if (changes[PROMPT_DRAFT_TARGET_KEY] && !draftTargetChangeFromThisPanel) {
+        const incoming = changes[PROMPT_DRAFT_TARGET_KEY].newValue;
+        promptDraftTarget = typeof incoming === "string" ? incoming : "";
+        if (!promptDraftPanel.hidden) {
+          renderDraftTargetOptions();
+        }
       }
       return;
     }
@@ -530,7 +562,7 @@ async function handleContextAction(mode: ContextMode): Promise<void> {
     return;
   }
   if (contextModeUsesPageText(mode) && !context.pageText?.trim()) {
-    showToast(uiText("Page body is unavailable on this page.", "このページの本文を取得できませんでした"));
+    showToast(tr("side.pageTextUnavailable"));
     return;
   }
 
@@ -625,27 +657,32 @@ function renderPromptList(): void {
     activePromptIndex = 0;
   }
   const templateIndex = new Map(visibleTemplates.map((template, index) => [template.id, index]));
-  const expandMatches = promptQuery.trim().length > 0;
+  const forceExpandAll = promptQuery.trim().length > 0;
   for (const group of groupPromptTemplatesByCategory(templates)) {
-    const isExpanded = expandMatches || expandedPromptCategories.has(group.category);
+    const isExpanded = forceExpandAll || isPromptCategoryExpanded(group.key);
     const groupElement = document.createElement("section");
     groupElement.className = "prompt-category-group";
-    groupElement.dataset.promptCategoryGroup = group.category;
+    groupElement.dataset.promptCategoryGroup = group.key;
 
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "prompt-category-toggle";
-    toggle.dataset.promptCategory = group.category;
+    toggle.dataset.promptCategory = group.key;
     toggle.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+
+    const chevron = document.createElement("span");
+    chevron.className = "prompt-category-chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.append(createCategoryChevronIcon());
 
     const label = document.createElement("span");
     label.className = "prompt-category-label";
-    label.textContent = group.category;
+    label.textContent = group.label;
 
     const count = document.createElement("span");
     count.className = "prompt-category-count";
     count.textContent = String(group.templates.length);
-    toggle.append(label, count);
+    toggle.append(chevron, label, count);
 
     const items = document.createElement("div");
     items.className = "prompt-category-items";
@@ -669,7 +706,7 @@ function renderPromptList(): void {
 
       const meta = document.createElement("span");
       meta.className = "prompt-row-meta";
-      meta.textContent = `${recentIds.includes(template.id) ? `${tr("side.recent")} · ` : ""}${template.category}`;
+      meta.textContent = `${recentIds.includes(template.id) ? `${tr("side.recent")} · ` : ""}${group.label}`;
 
       const edit = document.createElement("button");
       edit.type = "button";
@@ -688,11 +725,15 @@ function renderPromptList(): void {
   }
 }
 
-function togglePromptCategory(category: string): void {
-  if (expandedPromptCategories.has(category)) {
-    expandedPromptCategories.delete(category);
+function isPromptCategoryExpanded(categoryKey: string): boolean {
+  return !collapsedPromptCategories.has(categoryKey);
+}
+
+function togglePromptCategory(categoryKey: string): void {
+  if (collapsedPromptCategories.has(categoryKey)) {
+    collapsedPromptCategories.delete(categoryKey);
   } else {
-    expandedPromptCategories.add(category);
+    collapsedPromptCategories.add(categoryKey);
   }
   renderPromptList();
 }
@@ -701,18 +742,30 @@ function visiblePromptTemplates(templates: PromptTemplate[]): PromptTemplate[] {
   if (promptQuery.trim()) {
     return templates;
   }
-  return templates.filter((template) => expandedPromptCategories.has(template.category.trim() || uiText("Custom", "カスタム")));
+  return templates.filter((template) => isPromptCategoryExpanded(promptCategoryKey(template)));
 }
 
-function groupPromptTemplatesByCategory(templates: PromptTemplate[]): { category: string; templates: PromptTemplate[] }[] {
+function promptCategoryKey(template: PromptTemplate): string {
+  return template.category.trim() || UNCATEGORIZED_CATEGORY_KEY;
+}
+
+function promptCategoryLabel(categoryKey: string): string {
+  return categoryKey === UNCATEGORIZED_CATEGORY_KEY ? uiText("Custom", "カスタム") : categoryKey;
+}
+
+function groupPromptTemplatesByCategory(templates: PromptTemplate[]): { key: string; label: string; templates: PromptTemplate[] }[] {
   const groups = new Map<string, PromptTemplate[]>();
   for (const template of templates) {
-    const category = template.category.trim() || uiText("Custom", "カスタム");
-    const existing = groups.get(category) ?? [];
+    const key = promptCategoryKey(template);
+    const existing = groups.get(key) ?? [];
     existing.push(template);
-    groups.set(category, existing);
+    groups.set(key, existing);
   }
-  return [...groups.entries()].map(([category, groupedTemplates]) => ({ category, templates: groupedTemplates }));
+  return [...groups.entries()].map(([key, groupedTemplates]) => ({
+    key,
+    label: promptCategoryLabel(key),
+    templates: groupedTemplates
+  }));
 }
 
 function filteredPromptTemplates(): PromptTemplate[] {
@@ -784,6 +837,20 @@ function openPromptTemplateDraft(templateId: string): void {
   const template = promptTemplates.find((item) => item.id === templateId);
   if (!template) {
     return;
+  }
+
+  const existing = promptDraftTextarea.value;
+  if (existing.trim() && existing.trim() !== template.body.trim()) {
+    const confirmReplace = typeof window.confirm === "function"
+      ? window.confirm(uiText(
+          "A draft is already in progress. Replace it with this template?",
+          "編集中のDraftがあります。テンプレートで置き換えますか？"
+        ))
+      : true;
+    if (!confirmReplace) {
+      openPromptDraftPanel();
+      return;
+    }
   }
 
   setPromptDraft(template.body);
@@ -964,6 +1031,7 @@ async function handleAddCurrentContextToShelf(): Promise<void> {
   closeContextPopover();
   openContextShelfPanel();
   showToast(tr("side.shelfAdded"));
+  lastClearedShelfItems = null;
 }
 
 function createContextShelfItems(context: PageContext): ContextShelfItem[] {
@@ -999,41 +1067,55 @@ function addContextShelfItems(items: ContextShelfItem[]): void {
   contextShelfItems = [
     ...items,
     ...contextShelfItems.filter((existing) => !items.some((item) => item.text === existing.text))
-  ].slice(0, CONTEXT_SHELF_LIMIT);
+  ].slice(0, CONTEXT_SHELF_ITEM_LIMIT);
+  lastClearedShelfItems = null;
   saveContextShelfItems();
   renderContextShelf();
 }
 
-async function drainPendingContextShelfItems(): Promise<void> {
-  try {
-    const sessionArea = chrome.storage.session;
-    if (!sessionArea) {
-      return;
-    }
-    const stored = await sessionArea.get(PENDING_CONTEXT_SHELF_ITEMS_KEY);
-    const pending = normalizePendingContextShelfItems(stored[PENDING_CONTEXT_SHELF_ITEMS_KEY]);
-    if (pending.length === 0) {
-      return;
-    }
-
-    addContextShelfItems(pending);
-    await sessionArea.remove(PENDING_CONTEXT_SHELF_ITEMS_KEY);
-    openContextShelfPanel();
-    showToast(tr("side.shelfAdded"));
-  } catch (error) {
-    console.warn("Failed to drain pending Context Shelf items.", error);
+function drainPendingContextShelfItems(): Promise<void> {
+  if (pendingShelfDrainPromise) {
+    return pendingShelfDrainPromise;
   }
+
+  pendingShelfDrainPromise = (async () => {
+    try {
+      const sessionArea = chrome.storage.session;
+      if (!sessionArea) {
+        return;
+      }
+      const stored = await sessionArea.get(PENDING_CONTEXT_SHELF_ITEMS_KEY);
+      const pending = normalizePendingContextShelfItems(stored[PENDING_CONTEXT_SHELF_ITEMS_KEY]);
+      if (pending.length === 0) {
+        return;
+      }
+
+      addContextShelfItems(pending);
+      await sessionArea.remove(PENDING_CONTEXT_SHELF_ITEMS_KEY);
+      openContextShelfPanel();
+      showToast(tr("side.shelfAdded"));
+    } catch (error) {
+      console.warn("Failed to drain pending Context Shelf items.", error);
+    } finally {
+      pendingShelfDrainPromise = null;
+    }
+  })();
+
+  return pendingShelfDrainPromise;
 }
 
 function renderContextShelf(): void {
   contextShelfList.textContent = "";
   copyShelfButton.disabled = contextShelfItems.length === 0;
-  clearShelfButton.disabled = contextShelfItems.length === 0;
+  clearShelfButton.disabled = contextShelfItems.length === 0 && !lastClearedShelfItems;
+  clearShelfButton.textContent = lastClearedShelfItems
+    ? uiText("Undo clear", "削除を元に戻す")
+    : uiText("Clear all", "すべて削除");
 
   if (contextShelfItems.length === 0) {
     const empty = document.createElement("div");
     empty.className = "shelf-empty";
-    empty.textContent = uiText("No saved context yet.", "保存済みContextはまだありません");
+    empty.textContent = tr("side.shelfEmpty");
     contextShelfList.append(empty);
     return;
   }
@@ -1066,25 +1148,31 @@ function renderContextShelf(): void {
     preview.className = "shelf-row-preview";
     preview.textContent = item.text;
 
-  const actions = document.createElement("div");
-  actions.className = "shelf-row-actions";
-  actions.append(
-    shelfActionButton(item.id, "insert", uiText("Insert", "挿入")),
-    shelfActionButton(item.id, "copy", uiText("Copy", "コピー")),
-    shelfActionButton(item.id, "delete", uiText("Delete", "削除"))
-  );
+    const actions = document.createElement("div");
+    actions.className = "shelf-row-actions";
+    actions.append(
+      shelfActionButton(item.id, "insert", uiText("Insert", "挿入"), item.title),
+      shelfActionButton(item.id, "copy", uiText("Copy", "コピー"), item.title),
+      shelfActionButton(item.id, "delete", uiText("Delete", "削除"), item.title)
+    );
 
     row.append(header, preview, actions);
     contextShelfList.append(row);
   }
 }
 
-function shelfActionButton(itemId: string, action: string, label: string): HTMLButtonElement {
+function shelfActionButton(itemId: string, action: string, label: string, itemTitle?: string): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.shelfAction = action;
   button.dataset.shelfId = itemId;
   button.textContent = label;
+  if (itemTitle) {
+    button.setAttribute("aria-label", uiText(`${label} – ${itemTitle}`, `${itemTitle}を${label}`));
+    button.title = uiText(`${label} – ${itemTitle}`, `${itemTitle}を${label}`);
+  } else if (itemId === "all") {
+    button.setAttribute("aria-label", uiText(`${label} all shelf items`, `すべてのShelf項目を${label}`));
+  }
   return button;
 }
 
@@ -1117,45 +1205,46 @@ async function handleShelfAction(action: string, itemId: string): Promise<void> 
 }
 
 function clearContextShelf(): void {
+  if (lastClearedShelfItems) {
+    contextShelfItems = lastClearedShelfItems;
+    lastClearedShelfItems = null;
+    saveContextShelfItems();
+    renderContextShelf();
+    showToast(uiText("Shelf restored.", "Shelfを元に戻しました"));
+    return;
+  }
+
   if (contextShelfItems.length === 0) {
     return;
   }
+  lastClearedShelfItems = contextShelfItems;
   contextShelfItems = [];
   saveContextShelfItems();
   renderContextShelf();
   showToast(tr("side.shelfCleared"));
 }
 
-function readContextShelfItems(): ContextShelfItem[] {
+async function readContextShelfItems(): Promise<ContextShelfItem[]> {
   try {
-    const value = JSON.parse(sessionStorage.getItem(CONTEXT_SHELF_KEY) || "[]");
-    return Array.isArray(value)
-      ? value.map(normalizeContextShelfItem).filter((item): item is ContextShelfItem => !!item).slice(0, CONTEXT_SHELF_LIMIT)
-      : [];
+    const sessionArea = chrome.storage.session;
+    if (!sessionArea) {
+      return [];
+    }
+    const stored = await sessionArea.get(CONTEXT_SHELF_ITEMS_KEY);
+    return normalizeStoredContextShelfItems(stored[CONTEXT_SHELF_ITEMS_KEY]);
   } catch {
     return [];
   }
 }
 
-function normalizeContextShelfItem(value: unknown): ContextShelfItem | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const item = value as Partial<ContextShelfItem>;
-  if (typeof item.text !== "string" || !item.text.trim()) {
-    return null;
-  }
-  return {
-    id: typeof item.id === "string" && item.id ? item.id : makeLocalId(),
-    title: typeof item.title === "string" && item.title ? item.title : uiText("Saved context", "保存済みContext"),
-    subtitle: typeof item.subtitle === "string" ? item.subtitle : "",
-    text: item.text,
-    createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now()
-  };
-}
-
 function saveContextShelfItems(): void {
-  sessionStorage.setItem(CONTEXT_SHELF_KEY, JSON.stringify(contextShelfItems));
+  shelfChangeFromThisPanel = true;
+  void chrome.storage.session
+    .set({ [CONTEXT_SHELF_ITEMS_KEY]: contextShelfItems })
+    .catch((error) => console.warn("Failed to persist Context Shelf items.", error))
+    .finally(() => {
+      shelfChangeFromThisPanel = false;
+    });
 }
 
 function formatShelfText(items: ContextShelfItem[]): string {
@@ -1170,20 +1259,32 @@ function setPromptDraft(text: string): void {
   savePromptDraft(text);
 }
 
-function readPromptDraft(): string {
+async function readPromptDraft(): Promise<string> {
   try {
-    return sessionStorage.getItem(PROMPT_DRAFT_KEY) || "";
+    const sessionArea = chrome.storage.session;
+    if (!sessionArea) {
+      return "";
+    }
+    const stored = await sessionArea.get(PROMPT_DRAFT_KEY);
+    const value = stored[PROMPT_DRAFT_KEY];
+    return typeof value === "string" ? value : "";
   } catch {
     return "";
   }
 }
 
 function currentPromptDraftText(): string {
-  return promptDraftTextarea.value || readPromptDraft();
+  return promptDraftTextarea.value;
 }
 
 function savePromptDraft(text: string): void {
-  sessionStorage.setItem(PROMPT_DRAFT_KEY, text);
+  draftChangeFromThisPanel = true;
+  void chrome.storage.session
+    .set({ [PROMPT_DRAFT_KEY]: text })
+    .catch((error) => console.warn("Failed to persist Prompt Draft.", error))
+    .finally(() => {
+      draftChangeFromThisPanel = false;
+    });
 }
 
 function clearPromptDraft(): void {
@@ -1192,39 +1293,39 @@ function clearPromptDraft(): void {
   }
   setPromptDraft("");
   promptDraftTextarea.focus();
-  showToast(uiText("Draft cleared.", "Draftを空にしました"));
+  showToast(tr("side.draftCleared"));
 }
 
 async function insertPromptDraft(): Promise<void> {
   const rendered = await renderPromptDraftForService(currentAIService());
   if (!rendered.text) {
-    showToast(uiText("Draft is empty.", "Draftが空です"));
+    showToast(tr("side.draftEmpty"));
     return;
   }
   if (rendered.missingPageText) {
-    showToast(uiText("Page body is unavailable on this page.", "このページの本文を取得できませんでした"));
+    showToast(tr("side.pageTextUnavailable"));
     return;
   }
 
   const result = await insertIntoAI(rendered.text);
   closePromptDraftPanel();
-  showToast(insertResultMessage(result, uiText("Draft inserted.", "Draftを挿入しました")));
+  showToast(insertResultMessage(result, tr("side.draftInsert")));
   setComposerExpanded(false);
 }
 
 async function copyPromptDraft(): Promise<void> {
   const rendered = await renderPromptDraftForService(currentAIService());
   if (!rendered.text) {
-    showToast(uiText("Draft is empty.", "Draftが空です"));
+    showToast(tr("side.draftEmpty"));
     return;
   }
   if (rendered.missingPageText) {
-    showToast(uiText("Page body is unavailable on this page.", "このページの本文を取得できませんでした"));
+    showToast(tr("side.pageTextUnavailable"));
     return;
   }
 
   const copied = await copyTextFromSidePanel(rendered.text);
-  showToast(copied ? tr("common.copied") : tr("side.copyFailed"));
+  showToast(copied ? tr("side.draftCopied") : tr("side.copyFailed"));
 }
 
 async function tryPromptDraftInSelectedService(): Promise<void> {
@@ -1242,11 +1343,11 @@ async function tryPromptDraftInSelectedService(): Promise<void> {
   savePromptDraftTarget(target.id);
   const rendered = await renderPromptDraftForService(detectAIService(target.url));
   if (!rendered.text) {
-    showToast(uiText("Draft is empty.", "Draftが空です"));
+    showToast(tr("side.draftEmpty"));
     return;
   }
   if (rendered.missingPageText) {
-    showToast(uiText("Page body is unavailable on this page.", "このページの本文を取得できませんでした"));
+    showToast(tr("side.pageTextUnavailable"));
     return;
   }
 
@@ -1277,7 +1378,7 @@ async function renderPromptDraftForService(service: AIService): Promise<{ text: 
 
 function renderDraftTargetOptions(): void {
   const options = serviceOptions();
-  const preferred = draftTargetSelect.value || readPromptDraftTarget();
+  const preferred = draftTargetSelect.value || promptDraftTarget;
   const fallback = options.find((option) => !isActiveService(option)) || options[0];
   const selected = options.find((option) => option.id === preferred) || fallback;
 
@@ -1299,16 +1400,29 @@ function renderDraftTargetOptions(): void {
   }
 }
 
-function readPromptDraftTarget(): string {
+async function readPromptDraftTarget(): Promise<string> {
   try {
-    return sessionStorage.getItem(PROMPT_DRAFT_TARGET_KEY) || "";
+    const sessionArea = chrome.storage.session;
+    if (!sessionArea) {
+      return "";
+    }
+    const stored = await sessionArea.get(PROMPT_DRAFT_TARGET_KEY);
+    const value = stored[PROMPT_DRAFT_TARGET_KEY];
+    return typeof value === "string" ? value : "";
   } catch {
     return "";
   }
 }
 
 function savePromptDraftTarget(value: string): void {
-  sessionStorage.setItem(PROMPT_DRAFT_TARGET_KEY, value);
+  promptDraftTarget = value;
+  draftTargetChangeFromThisPanel = true;
+  void chrome.storage.session
+    .set({ [PROMPT_DRAFT_TARGET_KEY]: value })
+    .catch((error) => console.warn("Failed to persist Prompt Draft target.", error))
+    .finally(() => {
+      draftTargetChangeFromThisPanel = false;
+    });
 }
 
 function waitForTargetFrame(url: string, timeoutMs: number): Promise<void> {
@@ -1446,6 +1560,22 @@ function compactLines(lines: string[]): string {
 
 function makeLocalId(): string {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function createCategoryChevronIcon(): SVGElement {
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(svgNS, "path");
+  path.setAttribute("d", "M9 6l6 6-6 6");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "2");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.append(path);
+  return svg;
 }
 
 function uiText(en: string, ja: string): string {
@@ -2185,16 +2315,18 @@ function localizeStaticUi(): void {
   shelfButton.title = uiText("Open Context Shelf", "Context Shelfを開く");
   shelfButton.setAttribute("aria-label", shelfButton.title);
   const shelfLabel = typeof shelfButton.querySelector === "function" ? shelfButton.querySelector(".composer-button-label") : null;
-  if (shelfLabel) shelfLabel.textContent = uiText("Shelf", "Shelf");
+  if (shelfLabel) shelfLabel.textContent = tr("side.shelf");
   addContextToShelfButton.textContent = uiText("Add to Shelf", "Shelfに追加");
-  contextShelfPanel.setAttribute("aria-label", "Context Shelf");
-  contextShelfTitle.textContent = "Context Shelf";
+  const contextShelfTitleText = tr("side.contextShelf");
+  contextShelfPanel.setAttribute("aria-label", contextShelfTitleText);
+  contextShelfTitle.textContent = contextShelfTitleText;
   copyShelfButton.textContent = tr("side.shelfCopyAll");
   clearShelfButton.textContent = uiText("Clear all", "すべて削除");
-  promptDraftPanel.setAttribute("aria-label", "Prompt Draft");
-  promptDraftTitle.textContent = "Prompt Draft";
-  promptDraftTextarea.placeholder = uiText("Draft a prompt...", "Promptを下書き...");
-  draftTargetSelect.setAttribute("aria-label", uiText("Try in another AI", "別のAIで試す"));
+  const promptDraftTitleText = tr("side.promptDraft");
+  promptDraftPanel.setAttribute("aria-label", promptDraftTitleText);
+  promptDraftTitle.textContent = promptDraftTitleText;
+  promptDraftTextarea.placeholder = tr("side.draftPlaceholder");
+  draftTargetSelect.setAttribute("aria-label", tr("side.draftTry"));
   tryDraftButton.textContent = uiText("Try", "試す");
   insertDraftButton.textContent = uiText("Insert", "挿入");
   copyDraftButton.textContent = uiText("Copy", "コピー");

@@ -109,8 +109,14 @@ test("options renders custom prompt templates under category groups", async () =
     assert.equal(groups.length, 2);
     assert.match(textTree(groups[0]), /Research/);
     assert.match(textTree(groups[0]), /2 prompts/);
-    assert.equal(findAllByClass(groups[0], "prompt-category-items")[0].hidden, true);
+    // Default: all categories are expanded so the user sees rows immediately.
+    assert.equal(findAllByClass(groups[0], "prompt-category-items")[0].hidden, false);
+
     const categoryToggle = findByDataset(groups[0], "promptCategory", "Research");
+    // Toggling collapses an expanded category.
+    document.getElementById("promptTemplateList").dispatch("click", { target: categoryToggle });
+    assert.equal(findAllByClass(document.getElementById("promptTemplateList"), "prompt-category-items")[0].hidden, true);
+    // Toggling again expands it.
     document.getElementById("promptTemplateList").dispatch("click", { target: categoryToggle });
     assert.equal(findAllByClass(document.getElementById("promptTemplateList"), "prompt-category-items")[0].hidden, false);
 
@@ -124,6 +130,8 @@ test("options renders custom prompt templates under category groups", async () =
     assert.equal(findAllByClass(expandedGroups[1], "entry").length, 1);
     assert.equal(findAllByClass(expandedGroups[0], "entry-icon").length, 0);
     assert.equal(findAllByClass(expandedGroups[1], "entry-icon").length, 0);
+    // The per-entry category tag was removed (category is already shown as the group header).
+    assert.equal(findAllByClass(expandedGroups[0], "entry-tag").length, 0);
     assert.equal(findByDataset(expandedGroups[0], "entryId", "custom:research-a")?.dataset.entryId, "custom:research-a");
     assert.equal(findByDataset(expandedGroups[0], "entryId", "custom:research-b")?.dataset.entryId, "custom:research-b");
     assert.equal(findByDataset(expandedGroups[1], "entryId", "custom:writing-c")?.dataset.entryId, "custom:writing-c");

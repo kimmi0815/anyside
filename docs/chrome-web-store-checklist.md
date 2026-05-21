@@ -42,7 +42,7 @@ The extension intentionally does not request the persistent `tabs` permission. I
 
 ## Data Disclosure Notes
 
-- Stored data is local Chrome extension storage: settings, custom URLs, diagnostics, service order, quick access visibility, and prompt templates. Context Shelf items, Prompt Draft text, and pending context-menu Shelf selections are session-only.
+- Persistent local Chrome extension storage holds: settings, custom URLs, diagnostics, service order, quick access visibility, and prompt templates. Context Shelf items, Prompt Draft text, the Prompt Draft target service, and pending context-menu Shelf selections live in `chrome.storage.session` and are cleared when the browser session ends.
 - Active tab context is temporary and requested only after user action.
 - Clipboard writes are user-action driven or fallback behavior.
 - Custom URL favicon discovery omits credentials for extension fetches.

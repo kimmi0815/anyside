@@ -171,9 +171,15 @@ test("side panel prompt palette includes custom prompt templates from storage", 
     assert.match(textTree(document.getElementById("promptList")), /Research B/);
     const categoryLabels = findAllByClass(document.getElementById("promptList"), "prompt-category-label");
     assert.deepEqual(categoryLabels.map((label) => label.textContent), ["検証", "Research"]);
-    assert.equal(findAllByClass(document.getElementById("promptList"), "prompt-category-items")[0].hidden, true);
+    // Default state expands every category so prompts are visible immediately.
+    assert.equal(findAllByClass(document.getElementById("promptList"), "prompt-category-items")[0].hidden, false);
+    assert.equal(findAllByClass(document.getElementById("promptList"), "prompt-category-items")[1].hidden, false);
 
     const researchToggle = findByDataset(document.getElementById("promptList"), "promptCategory", "Research");
+    // Toggling collapses an expanded category.
+    document.getElementById("promptList").dispatch("click", { target: researchToggle });
+    assert.equal(findAllByClass(document.getElementById("promptList"), "prompt-category-items")[1].hidden, true);
+    // Toggling again expands it.
     document.getElementById("promptList").dispatch("click", { target: researchToggle });
     assert.equal(findAllByClass(document.getElementById("promptList"), "prompt-category-items")[1].hidden, false);
   } finally {
@@ -610,8 +616,9 @@ test("side panel prompt templates can use the current Prompt Draft", async () =>
     ]
   };
   const runtimeMessages = [];
-  const sessionStorage = createLocalStorage();
-  sessionStorage.setItem("composer.promptDraft", "Draft paragraph");
+  const sessionData = {
+    "composer.promptDraft": "Draft paragraph"
+  };
 
   globalThis.HTMLElement = FakeElement;
   globalThis.Element = FakeElement;
@@ -624,7 +631,7 @@ test("side panel prompt templates can use the current Prompt Draft", async () =>
   globalThis.HTMLTableSectionElement = FakeElement;
   globalThis.document = document;
   globalThis.localStorage = createLocalStorage();
-  globalThis.sessionStorage = sessionStorage;
+  globalThis.sessionStorage = createLocalStorage();
   globalThis.window = {
     location: { search: "" },
     addEventListener() {},
@@ -633,7 +640,7 @@ test("side panel prompt templates can use the current Prompt Draft", async () =>
     setInterval: scheduler.setInterval,
     clearInterval: scheduler.clearInterval
   };
-  globalThis.chrome = createChromeMock(storageData);
+  globalThis.chrome = createChromeMock(storageData, sessionData);
   globalThis.chrome.runtime.sendMessage = async (message) => {
     runtimeMessages.push(message);
     if (message.type === "GET_PAGE_CONTEXT") {
@@ -747,6 +754,155 @@ test("side panel opens saved prompts as temporary editable drafts from Prompt", 
     await flushAsync();
     assert.equal(document.getElementById("promptDraftPanel").hidden, true);
     assert.equal(document.getElementById("contextPopover").hidden, false);
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.document;
+    delete globalThis.localStorage;
+    delete globalThis.sessionStorage;
+    delete globalThis.window;
+    delete globalThis.HTMLElement;
+    delete globalThis.Element;
+    delete globalThis.Node;
+    delete globalThis.HTMLButtonElement;
+    delete globalThis.HTMLDetailsElement;
+    delete globalThis.HTMLIFrameElement;
+    delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLImageElement;
+    delete globalThis.HTMLTableSectionElement;
+  }
+});
+
+test("opening a saved prompt asks before overwriting an in-progress draft", async () => {
+  const scheduler = createScheduler();
+  const document = createSidepanelDocument();
+  const storageData = {
+    "composer.promptTemplates": [
+      {
+        id: "custom:editable",
+        title: "Editable Prompt",
+        category: "Test",
+        body: "Review {{title}}",
+        favorite: false,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ]
+  };
+  const sessionData = {
+    "composer.promptDraft": "Work in progress, do not lose me"
+  };
+  const confirmCalls = [];
+
+  globalThis.HTMLElement = FakeElement;
+  globalThis.Element = FakeElement;
+  globalThis.Node = FakeElement;
+  globalThis.HTMLButtonElement = FakeButtonElement;
+  globalThis.HTMLDetailsElement = FakeElement;
+  globalThis.HTMLIFrameElement = FakeIFrameElement;
+  globalThis.HTMLInputElement = FakeInputElement;
+  globalThis.HTMLImageElement = FakeImageElement;
+  globalThis.HTMLTableSectionElement = FakeElement;
+  globalThis.document = document;
+  globalThis.localStorage = createLocalStorage();
+  globalThis.sessionStorage = createLocalStorage();
+  globalThis.window = {
+    location: { search: "" },
+    addEventListener() {},
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    setInterval: scheduler.setInterval,
+    clearInterval: scheduler.clearInterval,
+    confirm(message) {
+      confirmCalls.push(message);
+      return false;
+    }
+  };
+  globalThis.chrome = createChromeMock(storageData, sessionData);
+
+  try {
+    await import(`../dist/sidepanel/main.js?prompt-edit-draft-guard-${Date.now()}`);
+    await flushAsync();
+
+    document.getElementById("promptButton").dispatch("click");
+    await flushAsync();
+    const editButton = findByDataset(document.getElementById("promptList"), "templateDraftId", "custom:editable");
+    document.getElementById("promptList").dispatch("click", { target: editButton });
+    await flushAsync();
+
+    assert.equal(confirmCalls.length, 1);
+    assert.match(confirmCalls[0], /draft/i);
+    // Draft text must NOT be replaced when the user declines.
+    assert.equal(document.getElementById("promptDraftTextarea").value, "Work in progress, do not lose me");
+    // The Draft panel still opens so the user can see their in-progress text.
+    assert.equal(document.getElementById("promptDraftPanel").hidden, false);
+    assert.equal(sessionData["composer.promptDraft"], "Work in progress, do not lose me");
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.document;
+    delete globalThis.localStorage;
+    delete globalThis.sessionStorage;
+    delete globalThis.window;
+    delete globalThis.HTMLElement;
+    delete globalThis.Element;
+    delete globalThis.Node;
+    delete globalThis.HTMLButtonElement;
+    delete globalThis.HTMLDetailsElement;
+    delete globalThis.HTMLIFrameElement;
+    delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLImageElement;
+    delete globalThis.HTMLTableSectionElement;
+  }
+});
+
+test("side panel persists Shelf items in chrome.storage.session across reopen", async () => {
+  const scheduler = createScheduler();
+  const document = createSidepanelDocument();
+  const storageData = {};
+  const sessionData = {
+    "composer.contextShelfItems": [
+      {
+        id: "persisted-1",
+        title: "Selection",
+        subtitle: "Article · docs.example.com",
+        text: "Previously saved selection",
+        createdAt: 1
+      }
+    ],
+    "composer.promptDraft": "Draft survives reopen",
+    "composer.promptDraftTarget": "claude"
+  };
+
+  globalThis.HTMLElement = FakeElement;
+  globalThis.Element = FakeElement;
+  globalThis.Node = FakeElement;
+  globalThis.HTMLButtonElement = FakeButtonElement;
+  globalThis.HTMLDetailsElement = FakeElement;
+  globalThis.HTMLIFrameElement = FakeIFrameElement;
+  globalThis.HTMLInputElement = FakeInputElement;
+  globalThis.HTMLImageElement = FakeImageElement;
+  globalThis.HTMLTableSectionElement = FakeElement;
+  globalThis.document = document;
+  globalThis.localStorage = createLocalStorage();
+  globalThis.sessionStorage = createLocalStorage();
+  globalThis.window = {
+    location: { search: "" },
+    addEventListener() {},
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    setInterval: scheduler.setInterval,
+    clearInterval: scheduler.clearInterval
+  };
+  globalThis.chrome = createChromeMock(storageData, sessionData);
+
+  try {
+    await import(`../dist/sidepanel/main.js?shelf-persist-${Date.now()}`);
+    await flushAsync();
+
+    document.getElementById("shelfButton").dispatch("click");
+    await flushAsync();
+    assert.match(textTree(document.getElementById("contextShelfList")), /Previously saved selection/);
+
+    assert.equal(document.getElementById("promptDraftTextarea").value, "Draft survives reopen");
   } finally {
     delete globalThis.chrome;
     delete globalThis.document;
@@ -1220,6 +1376,10 @@ class FakeDocument {
       return new FakeIFrameElement("", this);
     }
     return new FakeElement("", this);
+  }
+
+  createElementNS(_namespace, tagName) {
+    return this.createElement(tagName);
   }
 
   addEventListener(type, callback) {

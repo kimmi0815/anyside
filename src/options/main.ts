@@ -12,6 +12,7 @@ import type { PromptTemplate } from "../features/composer/types.js";
 import type { ActivePresetId, CustomUrl, PresetId, Settings } from "../shared/types.js";
 import { resolveLanguage, t, type ResolvedLanguage } from "../shared/i18n.js";
 import { labelFromUrl, normalizeUserUrl } from "../shared/url.js";
+import { UNCATEGORIZED_CATEGORY_KEY } from "../shared/contextShelfSession.js";
 
 const SERVICE_ICON_SRC: Partial<Record<PresetId, string>> = {
   chatgpt: "../../assets/service-icons/chatgpt.png",
@@ -59,7 +60,7 @@ let customPromptTemplates: PromptTemplate[] = [];
 let statusTimer: number | undefined;
 const promptTemplateOperations = new Map<string, Promise<void>>();
 const deletedPromptTemplateIds = new Set<string>();
-const expandedPromptTemplateCategories = new Set<string>();
+const collapsedPromptTemplateCategories = new Set<string>();
 
 void init();
 
@@ -355,7 +356,7 @@ function renderPromptTemplates(): void {
   }
 
   for (const group of groupPromptTemplatesByCategory(customPromptTemplates)) {
-    promptTemplateList.append(promptTemplateGroup(group.category, group.templates));
+    promptTemplateList.append(promptTemplateGroup(group.key, group.label, group.templates));
   }
 }
 
@@ -373,39 +374,62 @@ function promptTemplateCategories(): string[] {
   return [...new Set(customPromptTemplates.map((template) => template.category.trim()).filter(Boolean))];
 }
 
-function groupPromptTemplatesByCategory(templates: PromptTemplate[]): { category: string; templates: PromptTemplate[] }[] {
-  const groups = new Map<string, PromptTemplate[]>();
-  for (const template of templates) {
-    const category = template.category.trim() || tr("options.promptCategoryPlaceholder");
-    const existing = groups.get(category) ?? [];
-    existing.push(template);
-    groups.set(category, existing);
-  }
-  return [...groups.entries()].map(([category, groupedTemplates]) => ({ category, templates: groupedTemplates }));
+function promptCategoryKey(template: PromptTemplate): string {
+  return template.category.trim() || UNCATEGORIZED_CATEGORY_KEY;
 }
 
-function promptTemplateGroup(category: string, templates: PromptTemplate[]): HTMLElement {
+function promptCategoryLabel(categoryKey: string): string {
+  return categoryKey === UNCATEGORIZED_CATEGORY_KEY ? tr("options.promptCategoryPlaceholder") : categoryKey;
+}
+
+function isPromptTemplateCategoryExpanded(categoryKey: string): boolean {
+  return !collapsedPromptTemplateCategories.has(categoryKey);
+}
+
+function groupPromptTemplatesByCategory(templates: PromptTemplate[]): { key: string; label: string; templates: PromptTemplate[] }[] {
+  const groups = new Map<string, PromptTemplate[]>();
+  for (const template of templates) {
+    const key = promptCategoryKey(template);
+    const existing = groups.get(key) ?? [];
+    existing.push(template);
+    groups.set(key, existing);
+  }
+  return [...groups.entries()].map(([key, groupedTemplates]) => ({
+    key,
+    label: promptCategoryLabel(key),
+    templates: groupedTemplates
+  }));
+}
+
+function promptTemplateGroup(categoryKey: string, label: string, templates: PromptTemplate[]): HTMLElement {
   const group = document.createElement("section");
   group.className = "prompt-category-group";
-  group.dataset.promptCategoryGroup = category;
+  group.dataset.promptCategoryGroup = categoryKey;
 
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "prompt-category-toggle";
-  toggle.dataset.promptCategory = category;
-  toggle.setAttribute("aria-expanded", expandedPromptTemplateCategories.has(category) ? "true" : "false");
+  toggle.dataset.promptCategory = categoryKey;
+  const expanded = isPromptTemplateCategoryExpanded(categoryKey);
+  toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+
+  const chevron = document.createElement("span");
+  chevron.className = "prompt-category-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.append(svgIcon("M9 6l6 6-6 6"));
 
   const title = document.createElement("span");
   title.className = "prompt-category-title";
-  title.textContent = category;
+  title.textContent = label;
 
   const count = document.createElement("span");
+  count.className = "prompt-category-count";
   count.textContent = tr("options.promptCategoryCount", { count: templates.length });
-  toggle.append(title, count);
+  toggle.append(chevron, title, count);
 
   const items = document.createElement("div");
   items.className = "prompt-category-items";
-  items.hidden = !expandedPromptTemplateCategories.has(category);
+  items.hidden = !expanded;
   for (const template of templates) {
     items.append(promptTemplateEntry(template));
   }
@@ -414,11 +438,11 @@ function promptTemplateGroup(category: string, templates: PromptTemplate[]): HTM
   return group;
 }
 
-function togglePromptTemplateCategory(category: string): void {
-  if (expandedPromptTemplateCategories.has(category)) {
-    expandedPromptTemplateCategories.delete(category);
+function togglePromptTemplateCategory(categoryKey: string): void {
+  if (collapsedPromptTemplateCategories.has(categoryKey)) {
+    collapsedPromptTemplateCategories.delete(categoryKey);
   } else {
-    expandedPromptTemplateCategories.add(category);
+    collapsedPromptTemplateCategories.add(categoryKey);
   }
   renderPromptTemplates();
 }
@@ -482,10 +506,6 @@ function promptTemplateEntry(template: PromptTemplate): HTMLElement {
   const fields = document.createElement("div");
   fields.className = "entry-fields";
 
-  if (template.category) {
-    fields.append(entryTag(template.category));
-  }
-
   const titleInput = document.createElement("input");
   titleInput.className = "entry-input";
   titleInput.type = "text";
@@ -526,13 +546,6 @@ function promptTemplateEntry(template: PromptTemplate): HTMLElement {
   entry.append(foot);
 
   return entry;
-}
-
-function entryTag(label: string): HTMLElement {
-  const tag = document.createElement("span");
-  tag.className = "entry-tag";
-  tag.textContent = label;
-  return tag;
 }
 
 function entryActions(id: string, datasetKey: "deleteId" | "deletePromptId", removeLabel: string): HTMLElement {
@@ -685,6 +698,8 @@ async function handlePromptTemplateBlur(
         body: template.body,
         favorite: template.favorite
       });
+      const destinationKey = value || UNCATEGORIZED_CATEGORY_KEY;
+      collapsedPromptTemplateCategories.delete(destinationKey);
       showEntryStatus(entry, tr("common.saved"), "saved");
       renderPromptTemplates();
     });
