@@ -691,9 +691,20 @@ iframe {
 .composer-button-icon {
   display: inline-grid;
   width: 16px;
+  height: 16px;
   place-items: center;
   color: var(--accent);
   font-weight: 750;
+}
+
+.composer-button-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
 .composer-popover {
@@ -1012,6 +1023,17 @@ iframe {
   font-weight: 650;
   line-height: 1.25;
   white-space: nowrap;
+}
+
+.prompt-row-title[data-favorite="true"]::before {
+  content: "";
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 5px;
+  background: var(--accent);
+  clip-path: polygon(50% 0, 62% 35%, 100% 35%, 70% 57%, 82% 92%, 50% 70%, 18% 92%, 30% 57%, 0 35%, 38% 35%);
+  vertical-align: -1px;
 }
 
 .prompt-row-meta {

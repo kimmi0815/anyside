@@ -690,7 +690,10 @@ function renderPromptList(): void {
 
       const title = document.createElement("span");
       title.className = "prompt-row-title";
-      title.textContent = `${template.favorite ? "★ " : ""}${template.title}`;
+      title.textContent = template.title;
+      if (template.favorite) {
+        title.dataset.favorite = "true";
+      }
 
       const meta = document.createElement("span");
       meta.className = "prompt-row-meta";
@@ -700,9 +703,9 @@ function renderPromptList(): void {
       edit.type = "button";
       edit.className = "prompt-row-edit";
       edit.dataset.templateDraftId = template.id;
-      edit.textContent = uiText("Edit", "編集");
-      edit.title = uiText("Edit temporarily", "一時編集");
-      edit.setAttribute("aria-label", uiText(`Edit ${template.title} temporarily`, `${template.title}を一時編集`));
+      edit.textContent = tr("side.edit");
+      edit.title = tr("side.editTemporarily");
+      edit.setAttribute("aria-label", tr("side.editTemplateTemporarily", { title: template.title }));
 
       main.append(title, meta);
       row.append(main, edit);
@@ -738,7 +741,7 @@ function promptCategoryKey(template: PromptTemplate): string {
 }
 
 function promptCategoryLabel(categoryKey: string): string {
-  return categoryKey === UNCATEGORIZED_CATEGORY_KEY ? uiText("Custom", "カスタム") : categoryKey;
+  return categoryKey === UNCATEGORIZED_CATEGORY_KEY ? tr("options.promptCategoryPlaceholder") : categoryKey;
 }
 
 function groupPromptTemplatesByCategory(templates: PromptTemplate[]): { key: string; label: string; templates: PromptTemplate[] }[] {
@@ -830,10 +833,7 @@ function openPromptTemplateDraft(templateId: string): void {
   const existing = promptDraftTextarea.value;
   if (existing.trim() && existing.trim() !== template.body.trim()) {
     const confirmReplace = typeof window.confirm === "function"
-      ? window.confirm(uiText(
-          "A draft is already in progress. Replace it with this template?",
-          "編集中のDraftがあります。テンプレートで置き換えますか？"
-        ))
+      ? window.confirm(tr("side.replaceDraftConfirm"))
       : true;
     if (!confirmReplace) {
       openPromptDraftPanel();
@@ -1026,16 +1026,16 @@ function createContextShelfItems(context: PageContext): ContextShelfItem[] {
   const items: ContextShelfItem[] = [];
   const titleUrl = renderContextTemplate(context, "title_url", uiLanguage);
   if (titleUrl) {
-    items.push(createContextShelfItem(context, titleUrl, uiText("Title + URL", "タイトル + URL")));
+    items.push(createContextShelfItem(context, titleUrl, tr("side.titleUrl")));
   }
   if (context.selection.trim()) {
-    items.push(createContextShelfItem(context, context.selection.trim(), uiText("Selection", "選択テキスト")));
+    items.push(createContextShelfItem(context, context.selection.trim(), tr("side.selectionLabel")));
   }
   if (context.pageText?.trim()) {
     items.push(createContextShelfItem(
       context,
       renderSidePanelContextTemplate(context, "page_text", uiLanguage),
-      uiText("Page body", "本文")
+      tr("side.pageBody")
     ));
   }
   return items;
@@ -1097,8 +1097,8 @@ function renderContextShelf(): void {
   copyShelfButton.disabled = contextShelfItems.length === 0;
   clearShelfButton.disabled = contextShelfItems.length === 0 && !lastClearedShelfItems;
   clearShelfButton.textContent = lastClearedShelfItems
-    ? uiText("Undo clear", "削除を元に戻す")
-    : uiText("Clear all", "すべて削除");
+    ? tr("side.undoClear")
+    : tr("side.clearAll");
 
   if (contextShelfItems.length === 0) {
     const empty = document.createElement("div");
@@ -1139,9 +1139,9 @@ function renderContextShelf(): void {
     const actions = document.createElement("div");
     actions.className = "shelf-row-actions";
     actions.append(
-      shelfActionButton(item.id, "insert", uiText("Insert", "挿入"), item.title),
-      shelfActionButton(item.id, "copy", uiText("Copy", "コピー"), item.title),
-      shelfActionButton(item.id, "delete", uiText("Delete", "削除"), item.title)
+      shelfActionButton(item.id, "insert", tr("side.insert"), item.title),
+      shelfActionButton(item.id, "copy", tr("side.copy"), item.title),
+      shelfActionButton(item.id, "delete", tr("side.delete"), item.title)
     );
 
     row.append(header, preview, actions);
@@ -1156,10 +1156,11 @@ function shelfActionButton(itemId: string, action: string, label: string, itemTi
   button.dataset.shelfId = itemId;
   button.textContent = label;
   if (itemTitle) {
-    button.setAttribute("aria-label", uiText(`${label} – ${itemTitle}`, `${itemTitle}を${label}`));
-    button.title = uiText(`${label} – ${itemTitle}`, `${itemTitle}を${label}`);
+    const actionLabel = tr("side.shelfItemAction", { action: label, title: itemTitle });
+    button.setAttribute("aria-label", actionLabel);
+    button.title = actionLabel;
   } else if (itemId === "all") {
-    button.setAttribute("aria-label", uiText(`${label} all shelf items`, `すべてのShelf項目を${label}`));
+    button.setAttribute("aria-label", tr("side.shelfAllAction", { action: label }));
   }
   return button;
 }
@@ -1175,7 +1176,7 @@ async function handleShelfAction(action: string, itemId: string): Promise<void> 
     case "insert": {
       const result = await insertIntoAI(text);
       closeContextShelfPanel();
-      showToast(insertResultMessage(result, uiText("Inserted from Shelf.", "Shelfから挿入しました")));
+      showToast(insertResultMessage(result, tr("side.insertedFromShelf")));
       setComposerExpanded(false);
       break;
     }
@@ -1198,7 +1199,7 @@ function clearContextShelf(): void {
     lastClearedShelfItems = null;
     saveContextShelfItems();
     renderContextShelf();
-    showToast(uiText("Shelf restored.", "Shelfを元に戻しました"));
+    showToast(tr("side.shelfRestored"));
     return;
   }
 
@@ -1318,13 +1319,13 @@ async function copyPromptDraft(): Promise<void> {
 
 async function tryPromptDraftInSelectedService(): Promise<void> {
   if (isDiagnosticBusy()) {
-    showToast(uiText("Finish the active diagnostic first.", "診断が終わってから試してください"));
+    showToast(tr("side.finishDiagnosticFirst"));
     return;
   }
 
   const target = serviceOptions().find((option) => option.id === draftTargetSelect.value);
   if (!target) {
-    showToast(uiText("Choose a target AI.", "試すAIを選んでください"));
+    showToast(tr("side.chooseTargetAi"));
     return;
   }
 
@@ -1346,7 +1347,7 @@ async function tryPromptDraftInSelectedService(): Promise<void> {
 
   const result = await insertIntoAI(rendered.text);
   closePromptDraftPanel();
-  showToast(insertResultMessage(result, uiText(`Tried in ${target.label}.`, `${target.label}で試しました`)));
+  showToast(insertResultMessage(result, tr("side.triedInService", { label: target.label })));
   setComposerExpanded(false);
 }
 
@@ -1375,7 +1376,7 @@ function renderDraftTargetOptions(): void {
     const choice = document.createElement("option");
     choice.value = option.id;
     choice.textContent = isActiveService(option)
-      ? `${option.label} · ${uiText("current", "現在")}`
+      ? `${option.label} · ${tr("side.current")}`
       : option.label;
     draftTargetSelect.append(choice);
   }
@@ -1444,9 +1445,9 @@ function insertResultMessage(result: { method: "direct" | "clipboard"; message?:
 function contextActionLabel(mode: ContextMode, fallback: string): string {
   switch (mode) {
     case "page_text":
-      return uiText("Insert page body", "本文を挿入");
+      return tr("context.action.page_text");
     case "summarize_page_with_text":
-      return uiText("Summarize with body", "本文つきで要約");
+      return tr("context.action.summarize_page_with_text");
     default:
       return fallback;
   }
@@ -1467,28 +1468,28 @@ function renderPageBodyContextTemplate(context: PageContext, mode: Extract<Conte
   const headings = Array.isArray(context.headings) ? context.headings.map((heading) => heading.trim()).filter(Boolean) : [];
   const pageText = (context.pageText || "").trim();
   const lines = mode === "summarize_page_with_text"
-    ? [uiText("Please summarize this page using the body text.", "次のページ本文を使って要約してください"), ""]
+    ? [tr("context.summarizeWithTextIntro"), ""]
     : [];
 
   lines.push(
-    uiText("Title:", "タイトル:"),
+    tr("context.label.title"),
     title,
     "",
-    uiText("URL:", "URL:"),
+    tr("context.label.url"),
     url
   );
 
   if (domain) {
-    lines.push("", uiText("Domain:", "ドメイン:"), domain);
+    lines.push("", tr("context.label.domain"), domain);
   }
   if (headings.length > 0) {
-    lines.push("", uiText("Headings:", "見出し:"), headings.join("\n"));
+    lines.push("", tr("context.label.headings"), headings.join("\n"));
   }
   if (pageText) {
-    lines.push("", uiText("Page body:", "本文:"), pageText);
+    lines.push("", tr("context.label.pageText"), pageText);
   }
   if (context.pageTextTruncated) {
-    lines.push("", uiText("Page body was truncated.", "本文は途中まで取得されています"));
+    lines.push("", tr("context.pageTextTruncated"));
   }
 
   return compactLines(lines);
@@ -1509,7 +1510,7 @@ function promptBodyNeedsPageTextValue(body: string): boolean {
 function contextShelfSubtitle(context: PageContext): string {
   const parts = [
     context.domain || domainFromContextUrl(context.url),
-    context.selection.trim() ? uiText("Selection included", "選択範囲あり") : ""
+    context.selection.trim() ? tr("side.selectionIncluded") : ""
   ].filter(Boolean);
   return parts.join(" · ");
 }
@@ -1566,8 +1567,55 @@ function createCategoryChevronIcon(): SVGElement {
   return svg;
 }
 
-function uiText(en: string, ja: string): string {
-  return uiLanguage === "ja" ? ja : en;
+function setPanelToggleIcon(button: HTMLButtonElement, area: "header" | "footer", collapsed: boolean): void {
+  const svg = createIconSvg();
+  if (collapsed) {
+    if (area === "header") {
+      appendIconPath(svg, "M6 9h12");
+      appendIconPath(svg, "m9 14 3 3 3-3");
+    } else {
+      appendIconPath(svg, "M6 15h12");
+      appendIconPath(svg, "m9 10 3-3 3 3");
+    }
+    button.textContent = "";
+    button.append(svg);
+    return;
+  }
+
+  appendIconRect(svg, "4", "4", "16", "16", "2");
+  if (area === "header") {
+    appendIconPath(svg, "M8 7h8");
+    appendIconPath(svg, "m9 13 3-3 3 3");
+  } else {
+    appendIconPath(svg, "M8 17h8");
+    appendIconPath(svg, "m9 11 3 3 3-3");
+  }
+  button.textContent = "";
+  button.append(svg);
+}
+
+function createIconSvg(): SVGElement {
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  return svg;
+}
+
+function appendIconPath(svg: SVGElement, d: string): void {
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", d);
+  svg.append(path);
+}
+
+function appendIconRect(svg: SVGElement, x: string, y: string, width: string, height: string, rx: string): void {
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect.setAttribute("x", x);
+  rect.setAttribute("y", y);
+  rect.setAttribute("width", width);
+  rect.setAttribute("height", height);
+  rect.setAttribute("rx", rx);
+  svg.append(rect);
 }
 
 function showToast(message: string): void {
@@ -2274,6 +2322,10 @@ function localizeStaticUi(): void {
   if (document.documentElement) {
     document.documentElement.lang = uiLanguage;
   }
+  const serviceBar = typeof document.querySelector === "function" ? document.querySelector(".service-bar") : null;
+  if (serviceBar) serviceBar.setAttribute("aria-label", tr("side.aiServices"));
+  serviceSwitcher.setAttribute("aria-label", tr("side.registeredServices"));
+  dismissLayer.setAttribute("aria-label", tr("side.closeMenu"));
   hideServiceButton.textContent = tr("side.hideFromHeader");
   contextPopover.setAttribute("aria-label", tr("side.contextActions"));
   contextSummary.textContent = lastContext ? contextSummary.textContent : tr("side.noSelection");
@@ -2292,32 +2344,38 @@ function localizeStaticUi(): void {
   if (setupTitle) setupTitle.textContent = tr("side.setupTitle");
   if (setupCopy) setupCopy.textContent = tr("side.setupCopy");
   composerToolbar.setAttribute("aria-label", tr("side.composerTools"));
-  contextButton.title = tr("side.addPageContext");
+  contextButton.title = "";
+  contextButton.setAttribute("aria-label", tr("side.addPageContext"));
   const contextLabel = typeof contextButton.querySelector === "function" ? contextButton.querySelector(".composer-button-label") : null;
   if (contextLabel) contextLabel.textContent = tr("side.context");
-  promptButton.title = tr("side.openPromptPalette");
+  promptButton.title = "";
+  promptButton.setAttribute("aria-label", tr("side.openPromptPalette"));
   const promptLabel = typeof promptButton.querySelector === "function" ? promptButton.querySelector(".composer-button-label") : null;
   if (promptLabel) promptLabel.textContent = tr("side.prompt");
-  shelfButton.title = uiText("Open Context Shelf", "Context Shelfを開く");
-  shelfButton.setAttribute("aria-label", shelfButton.title);
+  shelfButton.title = "";
+  shelfButton.setAttribute("aria-label", tr("side.openContextShelf"));
   const shelfLabel = typeof shelfButton.querySelector === "function" ? shelfButton.querySelector(".composer-button-label") : null;
   if (shelfLabel) shelfLabel.textContent = tr("side.shelf");
-  addContextToShelfButton.textContent = uiText("Add to Shelf", "Shelfに追加");
+  addContextToShelfButton.textContent = tr("side.addContextToShelf");
+  const contextShelfActions = addContextToShelfButton.closest(".composer-secondary-actions");
+  if (contextShelfActions) contextShelfActions.setAttribute("aria-label", tr("side.contextShelfActions"));
   const contextShelfTitleText = tr("side.contextShelf");
   contextShelfPanel.setAttribute("aria-label", contextShelfTitleText);
   contextShelfTitle.textContent = contextShelfTitleText;
   copyShelfButton.textContent = tr("side.shelfCopyAll");
-  clearShelfButton.textContent = uiText("Clear all", "すべて削除");
+  clearShelfButton.textContent = tr("side.clearAll");
   const promptDraftTitleText = tr("side.promptDraft");
   promptDraftPanel.setAttribute("aria-label", promptDraftTitleText);
   promptDraftTitle.textContent = promptDraftTitleText;
   promptDraftTextarea.placeholder = tr("side.draftPlaceholder");
   draftTargetSelect.setAttribute("aria-label", tr("side.draftTry"));
-  tryDraftButton.textContent = uiText("Try", "試す");
-  insertDraftButton.textContent = uiText("Insert", "挿入");
-  copyDraftButton.textContent = uiText("Copy", "コピー");
-  clearDraftButton.textContent = uiText("Clear", "クリア");
-  moreActionsButton.title = tr("common.openSettings");
+  const draftActions = typeof document.querySelector === "function" ? document.querySelector(".draft-actions") : null;
+  if (draftActions) draftActions.setAttribute("aria-label", tr("side.draftActions"));
+  tryDraftButton.textContent = tr("side.try");
+  insertDraftButton.textContent = tr("side.insert");
+  copyDraftButton.textContent = tr("side.copy");
+  clearDraftButton.textContent = tr("side.clear");
+  moreActionsButton.title = "";
   moreActionsButton.setAttribute("aria-label", tr("common.openSettings"));
 }
 
@@ -2339,11 +2397,13 @@ function syncSidePanelChromeUi(): void {
   headerChromeToggleButton.title = headerLabel;
   headerChromeToggleButton.setAttribute("aria-label", headerLabel);
   headerChromeToggleButton.setAttribute("aria-expanded", headerCollapsed ? "false" : "true");
+  setPanelToggleIcon(headerChromeToggleButton, "header", headerCollapsed);
 
   const footerLabel = footerCollapsed ? tr("common.expandFooter") : tr("common.collapseFooter");
-  footerChromeToggleButton.title = footerLabel;
+  footerChromeToggleButton.title = "";
   footerChromeToggleButton.setAttribute("aria-label", footerLabel);
   footerChromeToggleButton.setAttribute("aria-expanded", footerCollapsed ? "false" : "true");
+  setPanelToggleIcon(footerChromeToggleButton, "footer", footerCollapsed);
 }
 
 async function setSidePanelChromeCollapsed(area: "header" | "footer", collapsed: boolean): Promise<void> {

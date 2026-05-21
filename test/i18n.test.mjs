@@ -81,8 +81,14 @@ test("new shelf, draft, and page text labels are localized in English and Japane
   assert.equal(t("ja", "side.shelfInsert"), "すべて挿入");
   assert.equal(t("en", "side.shelfCopyAll"), "Copy all");
   assert.equal(t("ja", "side.shelfCopyAll"), "すべてコピー");
+  assert.equal(t("en", "side.addContextToShelf"), "Add to Shelf");
+  assert.equal(t("ja", "side.addContextToShelf"), "Shelfに追加");
+  assert.equal(t("en", "side.shelfItemAction", { action: "Insert", title: "Selection" }), "Insert - Selection");
+  assert.equal(t("ja", "side.shelfItemAction", { action: "挿入", title: "選択テキスト" }), "選択テキストを挿入");
   assert.equal(t("en", "side.draftInsert"), "Insert Draft");
   assert.equal(t("ja", "side.draftInsert"), "Draftを挿入");
+  assert.equal(t("en", "side.try"), "Try");
+  assert.equal(t("ja", "side.try"), "試す");
   assert.equal(t("en", "context.action.page_text"), "Insert page text");
   assert.equal(t("ja", "context.action.page_text"), "本文を挿入");
   assert.equal(t("en", "context.label.pageText"), "Page text:");

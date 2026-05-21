@@ -16,10 +16,17 @@
       <section class="service-bar" aria-label="AI services">
         <div id="serviceSwitcher" class="service-switcher" role="tablist" aria-label="Registered AI services"></div>
         <button id="headerReloadButton" class="icon-button header-reload-button" type="button" aria-label="Reload current service" title="Reload current service">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8.1 8.1 0 0 0-14.7-4.6L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 14.7 4.6L20 16"/><path d="M20 20v-4h-4"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M3 12a9 9 0 1 0 3-6.7L3 8"/>
+            <path d="M3 3v5h5"/>
+          </svg>
         </button>
         <button id="headerChromeToggleButton" class="icon-button chrome-toggle-button header-chrome-toggle" type="button" aria-label="Collapse header" title="Collapse header">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 9h12"/><path d="m9 14 3 3 3-3"/></svg>
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <rect x="4" y="4" width="16" height="16" rx="2"/>
+            <path d="M8 7h8"/>
+            <path d="m9 13 3-3 3 3"/>
+          </svg>
         </button>
         <div id="serviceMenu" class="service-menu" role="menu" hidden>
           <button id="hideServiceButton" type="button" role="menuitem">Hide from header</button>
@@ -47,7 +54,7 @@
         <div id="composerToast" class="composer-toast" role="status" aria-live="polite" hidden></div>
 
         <section id="contextPopover" class="composer-popover context-popover" hidden aria-label="Context actions">
-          <p id="contextSummary" class="composer-popover-hint">選択テキストなし</p>
+          <p id="contextSummary" class="composer-popover-hint">No selected text</p>
           <div id="contextActions" class="composer-menu" role="menu"></div>
           <div class="composer-popover-divider" aria-hidden="true"></div>
           <div class="composer-secondary-actions" aria-label="Context shelf actions">
@@ -56,7 +63,7 @@
         </section>
 
         <section id="promptPalette" class="composer-popover prompt-palette" hidden role="dialog" aria-modal="false" aria-label="Prompt palette">
-          <input id="promptSearchInput" class="prompt-search" type="search" placeholder="Promptを検索..." autocomplete="off">
+          <input id="promptSearchInput" class="prompt-search" type="search" placeholder="Search prompts..." autocomplete="off">
           <div id="promptList" class="prompt-list" role="listbox" aria-label="Prompt templates"></div>
         </section>
 
@@ -77,7 +84,7 @@
           </div>
           <textarea id="promptDraftTextarea" class="prompt-draft-textarea" rows="7" spellcheck="true" placeholder="Draft a prompt..."></textarea>
           <div class="draft-target-row">
-            <select id="draftTargetSelect" class="draft-target-select" aria-label="Target AI"></select>
+            <select id="draftTargetSelect" class="draft-target-select" aria-label="Try in"></select>
             <button id="tryDraftButton" class="button" type="button">Try</button>
           </div>
           <div class="composer-secondary-actions draft-actions" aria-label="Draft actions">
@@ -113,24 +120,50 @@
 
       <section id="composerToolbar" class="composer-toolbar" aria-label="Prompt and context tools" data-expanded="false">
         <div id="composerActions" class="composer-actions">
-          <button id="contextButton" class="composer-button" type="button" aria-haspopup="menu" aria-expanded="false" title="Add page context">
-            <span class="composer-button-icon" aria-hidden="true">＋</span>
+          <button id="contextButton" class="composer-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add page context">
+            <span class="composer-button-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/>
+                <path d="M14 2v6h6"/>
+                <path d="M12 18v-6"/>
+                <path d="M9 15h6"/>
+              </svg>
+            </span>
             <span class="composer-button-label">Context</span>
           </button>
-          <button id="promptButton" class="composer-button" type="button" aria-haspopup="dialog" aria-expanded="false" title="Open prompt palette (⌘K / Ctrl+K)">
-            <span class="composer-button-icon" aria-hidden="true">⌘</span>
+          <button id="promptButton" class="composer-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Open prompt palette (Command-K / Ctrl-K)">
+            <span class="composer-button-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M21 15a4 4 0 0 1-4 4H7l-4 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"/>
+                <path d="M8 9h8"/>
+                <path d="M8 13h5"/>
+              </svg>
+            </span>
             <span class="composer-button-label">Prompt</span>
           </button>
-          <button id="shelfButton" class="composer-button" type="button" aria-haspopup="dialog" aria-expanded="false" title="Open Context Shelf">
-            <span class="composer-button-icon" aria-hidden="true">▤</span>
+          <button id="shelfButton" class="composer-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Context Shelf">
+            <span class="composer-button-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <rect x="3" y="4" width="18" height="4" rx="1"/>
+                <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/>
+                <path d="M10 12h4"/>
+              </svg>
+            </span>
             <span class="composer-button-label">Shelf</span>
           </button>
         </div>
-        <button id="moreActionsButton" class="icon-button settings-button" type="button" aria-label="Open settings" title="Open settings">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04A1.7 1.7 0 0 0 15 19.37a1.7 1.7 0 0 0-1 .46 1.7 1.7 0 0 0-.5 1.21V21a2 2 0 1 1-4 0v-.06a1.7 1.7 0 0 0-.5-1.21 1.7 1.7 0 0 0-1-.46 1.7 1.7 0 0 0-1.88.34l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-.46-1 1.7 1.7 0 0 0-1.21-.5H3a2 2 0 1 1 0-4h.06a1.7 1.7 0 0 0 1.21-.5 1.7 1.7 0 0 0 .46-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.7 1.7 0 0 0 9 4.63a1.7 1.7 0 0 0 1-.46 1.7 1.7 0 0 0 .5-1.21V3a2 2 0 1 1 4 0v.06a1.7 1.7 0 0 0 .5 1.21 1.7 1.7 0 0 0 1 .46 1.7 1.7 0 0 0 1.88-.34l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.7 1.7 0 0 0 19.37 9c.14.36.31.69.46 1 .31.31.74.5 1.21.5H21a2 2 0 1 1 0 4h-.06a1.7 1.7 0 0 0-1.21.5c-.19.31-.35.64-.46 1Z"/></svg>
+        <button id="moreActionsButton" class="icon-button settings-button" type="button" aria-label="Open Settings">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
+            <path d="M19 12a7 7 0 0 1-.1 1.1l2 1.5-2 3.5-2.4-1a7.5 7.5 0 0 1-1.9 1.1L14.3 21H9.7l-.3-2.8a7.5 7.5 0 0 1-1.9-1.1l-2.4 1-2-3.5 2-1.5A7 7 0 0 1 5 12a7 7 0 0 1 .1-1.1l-2-1.5 2-3.5 2.4 1a7.5 7.5 0 0 1 1.9-1.1L9.7 3h4.6l.3 2.8a7.5 7.5 0 0 1 1.9 1.1l2.4-1 2 3.5-2 1.5A7 7 0 0 1 19 12Z"/>
+          </svg>
         </button>
-        <button id="footerChromeToggleButton" class="icon-button chrome-toggle-button footer-chrome-toggle" type="button" aria-label="Collapse footer" title="Collapse footer">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 15h12"/><path d="m9 10 3-3 3 3"/></svg>
+        <button id="footerChromeToggleButton" class="icon-button chrome-toggle-button footer-chrome-toggle" type="button" aria-label="Collapse footer">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <rect x="4" y="4" width="16" height="16" rx="2"/>
+            <path d="M8 17h8"/>
+            <path d="m9 11 3 3 3-3"/>
+          </svg>
         </button>
       </section>
 
