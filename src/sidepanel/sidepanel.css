@@ -861,16 +861,40 @@ iframe {
 }
 
 .composer-menu button,
-.prompt-row {
+.prompt-row-main,
+.prompt-row-edit {
   display: grid;
-  width: 100%;
   border: 0;
   border-radius: 10px;
-  padding: 9px 10px;
   background: transparent;
   color: var(--text);
   cursor: pointer;
   text-align: left;
+}
+
+.prompt-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  border-radius: 10px;
+}
+
+.prompt-row-main {
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.prompt-row-edit {
+  min-width: 52px;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
 }
 
 .composer-menu button {
@@ -880,9 +904,11 @@ iframe {
 
 .composer-menu button:hover,
 .composer-menu button:focus-visible,
-.prompt-row:hover,
-.prompt-row:focus-visible,
-.prompt-row[aria-selected="true"] {
+.prompt-row-main:hover,
+.prompt-row-main:focus-visible,
+.prompt-row-edit:hover,
+.prompt-row-edit:focus-visible,
+.prompt-row[aria-selected="true"] .prompt-row-main {
   background: var(--surface-subtle);
 }
 

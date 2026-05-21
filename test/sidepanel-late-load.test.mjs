@@ -515,7 +515,7 @@ test("side panel does not request active tab context before a user action", asyn
 
     document.getElementById("promptButton").dispatch("click");
     await flushAsync();
-    const promptRow = document.getElementById("promptList").children[0];
+    const promptRow = findByDataset(document.getElementById("promptList"), "templateId", "custom:context");
     document.getElementById("promptList").dispatch("click", { target: promptRow });
     await flushAsync();
 
@@ -605,13 +605,89 @@ test("side panel prompt templates can use the current Prompt Draft", async () =>
 
     document.getElementById("promptButton").dispatch("click");
     await flushAsync();
-    const promptRow = document.getElementById("promptList").children[0];
+    const promptRow = findByDataset(document.getElementById("promptList"), "templateId", "custom:draft");
     document.getElementById("promptList").dispatch("click", { target: promptRow });
     await flushAsync();
 
     const insertMessage = runtimeMessages.find((message) => message.type === "INSERT_TEXT_TO_AI");
     assert.equal(insertMessage.text, "Draft:\nDraft paragraph");
     assert.equal(runtimeMessages.some((message) => message.type === "EXTRACT_ACTIVE_TAB_PAGE_TEXT"), false);
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.document;
+    delete globalThis.localStorage;
+    delete globalThis.sessionStorage;
+    delete globalThis.window;
+    delete globalThis.HTMLElement;
+    delete globalThis.Element;
+    delete globalThis.Node;
+    delete globalThis.HTMLButtonElement;
+    delete globalThis.HTMLDetailsElement;
+    delete globalThis.HTMLIFrameElement;
+    delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLImageElement;
+    delete globalThis.HTMLTableSectionElement;
+  }
+});
+
+test("side panel opens saved prompts as temporary editable drafts from Prompt", async () => {
+  const scheduler = createScheduler();
+  const document = createSidepanelDocument();
+  const storageData = {
+    "composer.promptTemplates": [
+      {
+        id: "custom:editable",
+        title: "Editable Prompt",
+        category: "Test",
+        body: "Review {{title}}",
+        favorite: false,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ]
+  };
+  const runtimeMessages = [];
+
+  globalThis.HTMLElement = FakeElement;
+  globalThis.Element = FakeElement;
+  globalThis.Node = FakeElement;
+  globalThis.HTMLButtonElement = FakeButtonElement;
+  globalThis.HTMLDetailsElement = FakeElement;
+  globalThis.HTMLIFrameElement = FakeIFrameElement;
+  globalThis.HTMLInputElement = FakeInputElement;
+  globalThis.HTMLImageElement = FakeImageElement;
+  globalThis.HTMLTableSectionElement = FakeElement;
+  globalThis.document = document;
+  globalThis.localStorage = createLocalStorage();
+  globalThis.sessionStorage = createLocalStorage();
+  globalThis.window = {
+    location: { search: "" },
+    addEventListener() {},
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    setInterval: scheduler.setInterval,
+    clearInterval: scheduler.clearInterval
+  };
+  globalThis.chrome = createChromeMock(storageData);
+  globalThis.chrome.runtime.sendMessage = async (message) => {
+    runtimeMessages.push(message);
+    return { ok: true };
+  };
+
+  try {
+    await import(`../dist/sidepanel/main.js?prompt-edit-draft-${Date.now()}`);
+    await flushAsync();
+
+    document.getElementById("promptButton").dispatch("click");
+    await flushAsync();
+    const editButton = findByDataset(document.getElementById("promptList"), "templateDraftId", "custom:editable");
+    document.getElementById("promptList").dispatch("click", { target: editButton });
+    await flushAsync();
+
+    assert.equal(document.getElementById("promptPalette").hidden, true);
+    assert.equal(document.getElementById("promptDraftPanel").hidden, false);
+    assert.equal(document.getElementById("promptDraftTextarea").value, "Review {{title}}");
+    assert.equal(runtimeMessages.some((message) => message.type === "INSERT_TEXT_TO_AI"), false);
   } finally {
     delete globalThis.chrome;
     delete globalThis.document;
@@ -862,7 +938,6 @@ function createSidepanelDocument() {
     "addContextToShelfButton",
     "sendContextToDraftButton",
     "shelfButton",
-    "draftButton",
     "copyShelfButton",
     "clearShelfButton",
     "tryDraftButton",
@@ -1151,6 +1226,9 @@ class FakeElement {
       return this;
     }
     if (selector === "button[data-template-var]" && this instanceof FakeButtonElement && this.dataset.templateVar) {
+      return this;
+    }
+    if (selector === "button[data-template-draft-id]" && this instanceof FakeButtonElement && this.dataset.templateDraftId) {
       return this;
     }
     if (selector === "[data-template-id]" && this.dataset.templateId) {

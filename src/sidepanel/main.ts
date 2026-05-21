@@ -78,7 +78,6 @@ const promptList = element<HTMLElement>("promptList");
 const addContextToShelfButton = element<HTMLButtonElement>("addContextToShelfButton");
 const sendContextToDraftButton = element<HTMLButtonElement>("sendContextToDraftButton");
 const shelfButton = element<HTMLButtonElement>("shelfButton");
-const draftButton = element<HTMLButtonElement>("draftButton");
 const contextShelfPanel = element<HTMLElement>("contextShelfPanel");
 const contextShelfTitle = element<HTMLElement>("contextShelfTitle");
 const contextShelfList = element<HTMLElement>("contextShelfList");
@@ -349,6 +348,13 @@ function bindComposerEvents(): void {
     renderPromptList();
   });
   promptList.addEventListener("click", (event) => {
+    const draftTarget = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-template-draft-id]") : null;
+    if (draftTarget) {
+      event.stopPropagation();
+      openPromptTemplateDraft(draftTarget.dataset.templateDraftId || "");
+      return;
+    }
+
     const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-template-id]") : null;
     if (!target) {
       return;
@@ -362,14 +368,6 @@ function bindComposerEvents(): void {
       return;
     }
     openContextShelfPanel();
-  });
-  draftButton.addEventListener("click", (event) => {
-    event.stopPropagation();
-    if (!promptDraftPanel.hidden) {
-      closeComposerMenus();
-      return;
-    }
-    openPromptDraftPanel();
   });
   contextShelfList.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-shelf-action][data-shelf-id]") : null;
@@ -595,7 +593,6 @@ function openPromptDraftPanel(): void {
   closePromptPalette();
   closeContextShelfPanel();
   setComposerExpanded(true);
-  draftButton.setAttribute("aria-expanded", "true");
   promptDraftPanel.hidden = false;
   promptDraftPanel.dataset.open = "true";
   renderDraftTargetOptions();
@@ -607,7 +604,6 @@ function openPromptDraftPanel(): void {
 function closePromptDraftPanel(): void {
   delete promptDraftPanel.dataset.open;
   promptDraftPanel.hidden = true;
-  draftButton.setAttribute("aria-expanded", "false");
   syncDismissLayer();
 }
 
@@ -625,12 +621,15 @@ function renderPromptList(): void {
   activePromptIndex = Math.max(0, Math.min(activePromptIndex, templates.length - 1));
   const recentIds = readRecentPromptIds();
   templates.forEach((template, index) => {
-    const row = document.createElement("button");
-    row.type = "button";
+    const row = document.createElement("div");
     row.className = "prompt-row";
-    row.dataset.templateId = template.id;
     row.setAttribute("role", "option");
     row.setAttribute("aria-selected", index === activePromptIndex ? "true" : "false");
+
+    const main = document.createElement("button");
+    main.type = "button";
+    main.className = "prompt-row-main";
+    main.dataset.templateId = template.id;
 
     const title = document.createElement("span");
     title.className = "prompt-row-title";
@@ -640,7 +639,16 @@ function renderPromptList(): void {
     meta.className = "prompt-row-meta";
     meta.textContent = `${recentIds.includes(template.id) ? `${tr("side.recent")} · ` : ""}${template.category}`;
 
-    row.append(title, meta);
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "prompt-row-edit";
+    edit.dataset.templateDraftId = template.id;
+    edit.textContent = uiText("Edit", "編集");
+    edit.title = uiText("Edit temporarily", "一時編集");
+    edit.setAttribute("aria-label", uiText(`Edit ${template.title} temporarily`, `${template.title}を一時編集`));
+
+    main.append(title, meta);
+    row.append(main, edit);
     promptList.append(row);
   });
 }
@@ -708,6 +716,17 @@ async function handlePromptSelection(templateId: string): Promise<void> {
   const result = await insertIntoAI(text);
   showToast(result.method === "direct" ? tr("side.promptInserted") : result.message || tr("side.promptCopied"));
   setComposerExpanded(false);
+}
+
+function openPromptTemplateDraft(templateId: string): void {
+  const template = promptTemplates.find((item) => item.id === templateId);
+  if (!template) {
+    return;
+  }
+
+  setPromptDraft(template.body);
+  rememberPromptTemplate(template.id);
+  openPromptDraftPanel();
 }
 
 async function collectPageContext(options: { includePageText?: boolean } = {}): Promise<PageContext> {
@@ -975,8 +994,7 @@ function renderContextShelf(): void {
   globalActions.className = "composer-secondary-actions";
   globalActions.append(
     shelfActionButton("all", "insert", tr("side.shelfInsert")),
-    shelfActionButton("all", "draft", tr("side.shelfToDraft")),
-    shelfActionButton("all", "copy", tr("side.shelfCopyAll"))
+    shelfActionButton("all", "draft", tr("side.shelfToDraft"))
   );
   contextShelfList.append(globalActions);
 
@@ -2175,10 +2193,6 @@ function localizeStaticUi(): void {
   shelfButton.setAttribute("aria-label", shelfButton.title);
   const shelfLabel = typeof shelfButton.querySelector === "function" ? shelfButton.querySelector(".composer-button-label") : null;
   if (shelfLabel) shelfLabel.textContent = uiText("Shelf", "Shelf");
-  draftButton.title = uiText("Open Prompt Draft", "Prompt Draftを開く");
-  draftButton.setAttribute("aria-label", draftButton.title);
-  const draftLabel = typeof draftButton.querySelector === "function" ? draftButton.querySelector(".composer-button-label") : null;
-  if (draftLabel) draftLabel.textContent = uiText("Draft", "Draft");
   addContextToShelfButton.textContent = uiText("Add to Shelf", "Shelfに追加");
   sendContextToDraftButton.textContent = uiText("Send to Draft", "Draftへ送る");
   contextShelfPanel.setAttribute("aria-label", "Context Shelf");
