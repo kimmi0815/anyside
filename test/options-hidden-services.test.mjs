@@ -120,9 +120,11 @@ test("options renders custom prompt templates under category groups", async () =
     document.getElementById("promptTemplateList").dispatch("click", { target: categoryToggle });
     assert.equal(findAllByClass(document.getElementById("promptTemplateList"), "prompt-category-items")[0].hidden, false);
 
-    const categoryOptions = document.getElementById("promptCategoryOptions");
-    assert.deepEqual(categoryOptions.children.map((option) => option.value), ["Research", "Writing"]);
-    assert.equal(document.getElementById("promptCategoryInput").attributes["list"], "promptCategoryOptions");
+    const categoryInput = document.getElementById("promptCategoryInput");
+    categoryInput.dispatch("focus");
+    const combobox = document.getElementById("promptCategoryCombobox");
+    const comboboxOptions = findAllByClass(combobox, "category-combobox-option");
+    assert.deepEqual(comboboxOptions.map((option) => option.textContent), ["Research", "Writing"]);
 
     const expandedGroups = findAllByClass(document.getElementById("promptTemplateList"), "prompt-category-group");
     assert.equal(findAllByClass(groups[0], "entry").length, 2);
@@ -153,7 +155,7 @@ function createOptionsDocument() {
     "hiddenServiceList",
     "customUrlList",
     "promptTemplateList",
-    "promptCategoryOptions",
+    "promptCategoryCombobox",
     "statusText",
     "aboutVersion"
   ]) {

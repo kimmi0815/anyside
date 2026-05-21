@@ -38,7 +38,7 @@ const customUrlList = element<HTMLElement>("customUrlList");
 const promptTemplateForm = element<HTMLFormElement>("promptTemplateForm");
 const promptTitleInput = element<HTMLInputElement>("promptTitleInput");
 const promptCategoryInput = element<HTMLInputElement>("promptCategoryInput");
-const promptCategoryOptions = element<HTMLDataListElement>("promptCategoryOptions");
+const promptCategoryCombobox = element<HTMLElement>("promptCategoryCombobox");
 const promptBodyInput = element<HTMLTextAreaElement>("promptBodyInput");
 const promptSubmitButton = element<HTMLButtonElement>("promptSubmitButton");
 const promptTemplateList = element<HTMLElement>("promptTemplateList");
@@ -71,6 +71,7 @@ async function init(): Promise<void> {
   await migrateBareCustomDefault();
   renderVersion();
   localizeStaticUi();
+  attachCategoryCombobox(promptCategoryCombobox, promptCategoryInput, promptTemplateCategories);
   render();
   bindEvents();
   observeSections();
@@ -186,7 +187,6 @@ function bindEvents(): void {
 
     if (changes[CUSTOM_PROMPT_TEMPLATES_KEY]) {
       customPromptTemplates = normalizeCustomPromptTemplates(changes[CUSTOM_PROMPT_TEMPLATES_KEY].newValue);
-      renderPromptCategoryOptions();
       renderPromptTemplates();
     }
 
@@ -248,7 +248,6 @@ function render(): void {
   languageSelect.value = settings.language;
   renderQuickAccessServices();
   renderCustomUrls();
-  renderPromptCategoryOptions();
   renderPromptTemplates();
 }
 
@@ -360,18 +359,180 @@ function renderPromptTemplates(): void {
   }
 }
 
-function renderPromptCategoryOptions(): void {
-  promptCategoryOptions.textContent = "";
-  promptCategoryInput.setAttribute("list", "promptCategoryOptions");
-  for (const category of promptTemplateCategories()) {
-    const option = document.createElement("option");
-    option.value = category;
-    promptCategoryOptions.append(option);
-  }
-}
-
 function promptTemplateCategories(): string[] {
   return [...new Set(customPromptTemplates.map((template) => template.category.trim()).filter(Boolean))];
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function attachCategoryCombobox(
+  wrapper: HTMLElement,
+  input: HTMLInputElement,
+  getOptions: () => string[]
+): void {
+  const chevron = document.createElement("button");
+  chevron.className = "category-combobox-chevron";
+  chevron.type = "button";
+  chevron.tabIndex = -1;
+  chevron.setAttribute("aria-label", tr("options.openCategoryList"));
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", "m6 9 6 6 6-6");
+  svg.append(path);
+  chevron.append(svg);
+
+  const panel = document.createElement("div");
+  panel.className = "category-combobox-panel";
+  panel.hidden = true;
+  panel.setAttribute("role", "listbox");
+
+  wrapper.append(chevron, panel);
+
+  let open = false;
+  let activeIndex = -1;
+  let optionButtons: HTMLButtonElement[] = [];
+  let blurTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function renderOptions(): void {
+    panel.textContent = "";
+    optionButtons = [];
+    const allCategories = getOptions();
+    const query = input.value.trim().toLowerCase();
+    const filtered = query
+      ? allCategories.filter((category) => category.toLowerCase().includes(query))
+      : allCategories;
+
+    if (filtered.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "category-combobox-empty";
+      empty.textContent = tr("options.noCategoryMatches");
+      panel.append(empty);
+      return;
+    }
+
+    filtered.forEach((category, index) => {
+      const button = document.createElement("button");
+      button.className = "category-combobox-option";
+      button.type = "button";
+      button.tabIndex = -1;
+      button.setAttribute("role", "option");
+      button.textContent = category;
+      button.dataset.index = String(index);
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+      });
+      button.addEventListener("click", () => {
+        input.value = category;
+        closePanel();
+        input.focus();
+      });
+      panel.append(button);
+      optionButtons.push(button);
+    });
+  }
+
+  function syncActive(): void {
+    optionButtons.forEach((button, index) => {
+      if (index === activeIndex) {
+        button.dataset.active = "true";
+      } else {
+        delete button.dataset.active;
+      }
+    });
+  }
+
+  function openPanel(): void {
+    if (open) {
+      return;
+    }
+    open = true;
+    wrapper.dataset.open = "true";
+    panel.hidden = false;
+    renderOptions();
+  }
+
+  function closePanel(): void {
+    if (!open) {
+      return;
+    }
+    open = false;
+    activeIndex = -1;
+    delete wrapper.dataset.open;
+    panel.hidden = true;
+  }
+
+  input.addEventListener("focus", () => {
+    if (blurTimer !== undefined) {
+      clearTimeout(blurTimer);
+      blurTimer = undefined;
+    }
+    openPanel();
+  });
+
+  input.addEventListener("input", () => {
+    activeIndex = -1;
+    if (open) {
+      renderOptions();
+    } else {
+      openPanel();
+    }
+  });
+
+  input.addEventListener("blur", () => {
+    blurTimer = setTimeout(() => {
+      closePanel();
+      blurTimer = undefined;
+    }, 120);
+  });
+
+  input.addEventListener("keydown", (event) => {
+    const keyEvent = event as KeyboardEvent;
+    if (keyEvent.key === "Escape" && open) {
+      keyEvent.stopPropagation();
+      closePanel();
+      return;
+    }
+    if (!open) {
+      if (keyEvent.key === "ArrowDown") {
+        keyEvent.preventDefault();
+        openPanel();
+      }
+      return;
+    }
+    if (keyEvent.key === "ArrowDown") {
+      keyEvent.preventDefault();
+      if (optionButtons.length === 0) {
+        return;
+      }
+      activeIndex = activeIndex < optionButtons.length - 1 ? activeIndex + 1 : 0;
+      syncActive();
+    } else if (keyEvent.key === "ArrowUp") {
+      keyEvent.preventDefault();
+      if (optionButtons.length === 0) {
+        return;
+      }
+      activeIndex = activeIndex > 0 ? activeIndex - 1 : optionButtons.length - 1;
+      syncActive();
+    } else if (keyEvent.key === "Enter" && activeIndex >= 0 && optionButtons[activeIndex]) {
+      keyEvent.preventDefault();
+      optionButtons[activeIndex].click();
+    }
+  });
+
+  chevron.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+  });
+
+  chevron.addEventListener("click", () => {
+    if (open) {
+      closePanel();
+    } else {
+      input.focus();
+      openPanel();
+    }
+  });
 }
 
 function promptCategoryKey(template: PromptTemplate): string {
@@ -520,10 +681,14 @@ function promptTemplateEntry(template: PromptTemplate): HTMLElement {
   categoryInput.name = "category";
   categoryInput.value = template.category;
   categoryInput.placeholder = tr("options.promptCategory");
-  categoryInput.setAttribute("list", "promptCategoryOptions");
   categoryInput.setAttribute("aria-label", tr("options.promptCategoryInput"));
 
-  fields.append(titleInput, categoryInput);
+  const categoryWrapper = document.createElement("div");
+  categoryWrapper.className = "category-combobox category-combobox-inline";
+  categoryWrapper.append(categoryInput);
+  attachCategoryCombobox(categoryWrapper, categoryInput, promptTemplateCategories);
+
+  fields.append(titleInput, categoryWrapper);
   head.append(fields, entryActions(template.id, "deletePromptId", tr("options.removePrompt")));
   entry.append(head);
 
