@@ -869,6 +869,58 @@ iframe {
   text-align: left;
 }
 
+.prompt-category-group {
+  display: grid;
+  gap: 2px;
+}
+
+.prompt-category-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.prompt-category-toggle:hover,
+.prompt-category-toggle:focus-visible {
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+
+.prompt-category-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-category-count {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.prompt-category-items {
+  display: grid;
+  gap: 2px;
+}
+
+.prompt-category-items[hidden] {
+  display: none;
+}
+
 .prompt-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

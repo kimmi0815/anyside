@@ -51,23 +51,31 @@
             <p data-i18n="options.servicesCopy">Choose which services appear in the side panel header. Add trusted custom AI workspaces below.</p>
           </div>
 
-          <form id="customUrlForm" class="custom-form" novalidate>
-            <label class="field">
-              <span data-i18n="options.name">Name</span>
-              <input id="customLabelInput" type="text" placeholder="Research workspace" data-i18n-attr="placeholder:options.namePlaceholder">
-            </label>
-            <label class="field">
-              <span data-i18n="options.url">URL</span>
-              <input id="customUrlInput" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="example.com or https://example.com/" data-i18n-attr="placeholder:options.urlPlaceholder">
-            </label>
-            <button class="button primary" type="submit">
-              <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14"><path d="M12 5v14M5 12h14" stroke-linecap="round" stroke-width="2.2"/></svg>
-              <span data-i18n="options.addUrl">Add URL</span>
-            </button>
-          </form>
-
-          <div id="customUrlList" class="card-list"></div>
           <div id="hiddenServiceList" class="hidden-service-list"></div>
+
+          <div class="custom-url-section">
+            <div class="subsection-head">
+              <h3 data-i18n="options.customUrls">Custom URLs</h3>
+              <p data-i18n="options.customUrlsCopy">Add trusted AI workspaces or local test pages.</p>
+            </div>
+
+            <form id="customUrlForm" class="custom-form" novalidate>
+              <label class="field">
+                <span data-i18n="options.name">Name</span>
+                <input id="customLabelInput" type="text" placeholder="Research workspace" data-i18n-attr="placeholder:options.namePlaceholder">
+              </label>
+              <label class="field">
+                <span data-i18n="options.url">URL</span>
+                <input id="customUrlInput" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="example.com or https://example.com/" data-i18n-attr="placeholder:options.urlPlaceholder">
+              </label>
+              <button class="button primary" type="submit">
+                <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14"><path d="M12 5v14M5 12h14" stroke-linecap="round" stroke-width="2.2"/></svg>
+                <span data-i18n="options.addUrl">Add URL</span>
+              </button>
+            </form>
+
+            <div id="customUrlList" class="card-list"></div>
+          </div>
         </section>
 
         <section id="prompts" class="card">
@@ -83,7 +91,8 @@
             </label>
             <label class="field">
               <span data-i18n="options.promptCategory">Category</span>
-              <input id="promptCategoryInput" type="text" autocomplete="off" placeholder="カスタム" data-i18n-attr="placeholder:options.promptCategoryPlaceholder">
+              <input id="promptCategoryInput" type="text" autocomplete="off" list="promptCategoryOptions" placeholder="カスタム" data-i18n-attr="placeholder:options.promptCategoryPlaceholder">
+              <datalist id="promptCategoryOptions"></datalist>
             </label>
             <button id="promptSubmitButton" class="button primary" type="submit">
               <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14"><path d="M12 5v14M5 12h14" stroke-linecap="round" stroke-width="2.2"/></svg>
@@ -94,8 +103,6 @@
               <textarea id="promptBodyInput" rows="6" spellcheck="true" placeholder="次のページについて...&#10;&#10;タイトル:&#10;{{title}}&#10;&#10;URL:&#10;{{url}}&#10;&#10;内容:&#10;{{selection}}" data-i18n-attr="placeholder:options.promptBodyPlaceholder"></textarea>
             </label>
           </form>
-
-          <p class="hint"><span data-i18n="options.variables">Available variables:</span> <code>{{title}}</code> <code>{{url}}</code> <code>{{selection}}</code> <code>{{date}}</code> <code>{{service}}</code> <code>{{draft}}</code> <code>{{domain}}</code> <code>{{headings}}</code> <code>{{pageText}}</code></p>
 
           <div id="promptTemplateList" class="card-list"></div>
         </section>

@@ -378,6 +378,35 @@ a.button {
   margin-top: 18px;
 }
 
+.custom-url-section {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.custom-url-section .card-list {
+  margin-top: 12px;
+}
+
+.subsection-head {
+  margin-bottom: 12px;
+}
+
+.subsection-head h3 {
+  margin: 0 0 3px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.subsection-head p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .entry {
   display: grid;
   gap: 8px;
@@ -398,6 +427,10 @@ a.button {
   grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
+}
+
+.prompt-template-entry .entry-head {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .entry-icon {
@@ -536,9 +569,15 @@ a.button {
   min-height: 16px;
 }
 
+.prompt-template-entry .entry-foot {
+  padding-left: 0;
+}
+
 .entry-tag {
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
+  width: fit-content;
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--accent-soft);
@@ -594,9 +633,7 @@ a.button {
 /* ---------- Quick access ---------- */
 
 .hidden-service-list {
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px dashed var(--line);
+  margin-top: 0;
 }
 
 .hidden-service-list:empty {
@@ -643,6 +680,64 @@ a.button {
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---------- Prompt template hierarchy ---------- */
+
+.prompt-category-group {
+  display: grid;
+  gap: 8px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.prompt-category-group:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.prompt-category-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.prompt-category-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-category-toggle span:not(.prompt-category-title) {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.prompt-category-toggle:hover .prompt-category-title,
+.prompt-category-toggle:focus-visible .prompt-category-title {
+  color: var(--accent);
+}
+
+.prompt-category-items {
+  display: grid;
+  gap: 8px;
+}
+
+.prompt-category-items[hidden] {
+  display: none;
 }
 
 /* ---------- Toggle ---------- */

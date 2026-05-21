@@ -131,6 +131,7 @@ let activeFrameCompatibilitySessionId: string | undefined;
 let lastContext: PageContext | null = null;
 let promptQuery = "";
 let activePromptIndex = 0;
+const expandedPromptCategories = new Set<string>();
 let toastTimer: number | undefined;
 let toastExitTimer: number | undefined;
 let composerCollapsed = true;
@@ -343,6 +344,13 @@ function bindComposerEvents(): void {
     renderPromptList();
   });
   promptList.addEventListener("click", (event) => {
+    const categoryToggle = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-prompt-category]") : null;
+    if (categoryToggle?.dataset.promptCategory) {
+      event.stopPropagation();
+      togglePromptCategory(categoryToggle.dataset.promptCategory);
+      return;
+    }
+
     const draftTarget = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-template-draft-id]") : null;
     if (draftTarget) {
       event.stopPropagation();
@@ -609,39 +617,102 @@ function renderPromptList(): void {
     return;
   }
 
-  activePromptIndex = Math.max(0, Math.min(activePromptIndex, templates.length - 1));
   const recentIds = readRecentPromptIds();
-  templates.forEach((template, index) => {
-    const row = document.createElement("div");
-    row.className = "prompt-row";
-    row.setAttribute("role", "option");
-    row.setAttribute("aria-selected", index === activePromptIndex ? "true" : "false");
+  const visibleTemplates = visiblePromptTemplates(templates);
+  if (visibleTemplates.length > 0) {
+    activePromptIndex = Math.max(0, Math.min(activePromptIndex, visibleTemplates.length - 1));
+  } else {
+    activePromptIndex = 0;
+  }
+  const templateIndex = new Map(visibleTemplates.map((template, index) => [template.id, index]));
+  const expandMatches = promptQuery.trim().length > 0;
+  for (const group of groupPromptTemplatesByCategory(templates)) {
+    const isExpanded = expandMatches || expandedPromptCategories.has(group.category);
+    const groupElement = document.createElement("section");
+    groupElement.className = "prompt-category-group";
+    groupElement.dataset.promptCategoryGroup = group.category;
 
-    const main = document.createElement("button");
-    main.type = "button";
-    main.className = "prompt-row-main";
-    main.dataset.templateId = template.id;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "prompt-category-toggle";
+    toggle.dataset.promptCategory = group.category;
+    toggle.setAttribute("aria-expanded", isExpanded ? "true" : "false");
 
-    const title = document.createElement("span");
-    title.className = "prompt-row-title";
-    title.textContent = `${template.favorite ? "★ " : ""}${template.title}`;
+    const label = document.createElement("span");
+    label.className = "prompt-category-label";
+    label.textContent = group.category;
 
-    const meta = document.createElement("span");
-    meta.className = "prompt-row-meta";
-    meta.textContent = `${recentIds.includes(template.id) ? `${tr("side.recent")} · ` : ""}${template.category}`;
+    const count = document.createElement("span");
+    count.className = "prompt-category-count";
+    count.textContent = String(group.templates.length);
+    toggle.append(label, count);
 
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "prompt-row-edit";
-    edit.dataset.templateDraftId = template.id;
-    edit.textContent = uiText("Edit", "編集");
-    edit.title = uiText("Edit temporarily", "一時編集");
-    edit.setAttribute("aria-label", uiText(`Edit ${template.title} temporarily`, `${template.title}を一時編集`));
+    const items = document.createElement("div");
+    items.className = "prompt-category-items";
+    items.hidden = !isExpanded;
 
-    main.append(title, meta);
-    row.append(main, edit);
-    promptList.append(row);
-  });
+    for (const template of group.templates) {
+      const index = templateIndex.get(template.id) ?? -1;
+      const row = document.createElement("div");
+      row.className = "prompt-row";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", index === activePromptIndex ? "true" : "false");
+
+      const main = document.createElement("button");
+      main.type = "button";
+      main.className = "prompt-row-main";
+      main.dataset.templateId = template.id;
+
+      const title = document.createElement("span");
+      title.className = "prompt-row-title";
+      title.textContent = `${template.favorite ? "★ " : ""}${template.title}`;
+
+      const meta = document.createElement("span");
+      meta.className = "prompt-row-meta";
+      meta.textContent = `${recentIds.includes(template.id) ? `${tr("side.recent")} · ` : ""}${template.category}`;
+
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "prompt-row-edit";
+      edit.dataset.templateDraftId = template.id;
+      edit.textContent = uiText("Edit", "編集");
+      edit.title = uiText("Edit temporarily", "一時編集");
+      edit.setAttribute("aria-label", uiText(`Edit ${template.title} temporarily`, `${template.title}を一時編集`));
+
+      main.append(title, meta);
+      row.append(main, edit);
+      items.append(row);
+    }
+    groupElement.append(toggle, items);
+    promptList.append(groupElement);
+  }
+}
+
+function togglePromptCategory(category: string): void {
+  if (expandedPromptCategories.has(category)) {
+    expandedPromptCategories.delete(category);
+  } else {
+    expandedPromptCategories.add(category);
+  }
+  renderPromptList();
+}
+
+function visiblePromptTemplates(templates: PromptTemplate[]): PromptTemplate[] {
+  if (promptQuery.trim()) {
+    return templates;
+  }
+  return templates.filter((template) => expandedPromptCategories.has(template.category.trim() || uiText("Custom", "カスタム")));
+}
+
+function groupPromptTemplatesByCategory(templates: PromptTemplate[]): { category: string; templates: PromptTemplate[] }[] {
+  const groups = new Map<string, PromptTemplate[]>();
+  for (const template of templates) {
+    const category = template.category.trim() || uiText("Custom", "カスタム");
+    const existing = groups.get(category) ?? [];
+    existing.push(template);
+    groups.set(category, existing);
+  }
+  return [...groups.entries()].map(([category, groupedTemplates]) => ({ category, templates: groupedTemplates }));
 }
 
 function filteredPromptTemplates(): PromptTemplate[] {
@@ -665,7 +736,7 @@ function promptRank(template: PromptTemplate, recentIds: string[]): number {
 }
 
 function handlePromptPaletteKeydown(event: KeyboardEvent): void {
-  const templates = filteredPromptTemplates();
+  const templates = visiblePromptTemplates(filteredPromptTemplates());
   if (templates.length === 0) {
     return;
   }

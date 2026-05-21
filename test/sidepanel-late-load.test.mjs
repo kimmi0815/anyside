@@ -116,6 +116,24 @@ test("side panel prompt palette includes custom prompt templates from storage", 
         favorite: true,
         createdAt: 1,
         updatedAt: 1
+      },
+      {
+        id: "custom:research-a",
+        title: "Research A",
+        category: "Research",
+        body: "Research A body",
+        favorite: true,
+        createdAt: 2,
+        updatedAt: 2
+      },
+      {
+        id: "custom:research-b",
+        title: "Research B",
+        category: "Research",
+        body: "Research B body",
+        favorite: false,
+        createdAt: 3,
+        updatedAt: 3
       }
     ]
   };
@@ -144,12 +162,20 @@ test("side panel prompt palette includes custom prompt templates from storage", 
     await flushAsync();
 
     document.getElementById("composerLauncherButton").dispatch("click");
-    document.getElementById("promptSearchInput").value = "動作確認";
     document.getElementById("promptButton").dispatch("click");
     await flushAsync();
 
     assert.match(textTree(document.getElementById("promptList")), /動作確認Prompt/);
     assert.match(textTree(document.getElementById("promptList")), /検証/);
+    assert.match(textTree(document.getElementById("promptList")), /Research A/);
+    assert.match(textTree(document.getElementById("promptList")), /Research B/);
+    const categoryLabels = findAllByClass(document.getElementById("promptList"), "prompt-category-label");
+    assert.deepEqual(categoryLabels.map((label) => label.textContent), ["検証", "Research"]);
+    assert.equal(findAllByClass(document.getElementById("promptList"), "prompt-category-items")[0].hidden, true);
+
+    const researchToggle = findByDataset(document.getElementById("promptList"), "promptCategory", "Research");
+    document.getElementById("promptList").dispatch("click", { target: researchToggle });
+    assert.equal(findAllByClass(document.getElementById("promptList"), "prompt-category-items")[1].hidden, false);
   } finally {
     delete globalThis.chrome;
     delete globalThis.document;
@@ -1066,6 +1092,15 @@ function findByDataset(element, key, value) {
   return null;
 }
 
+function findAllByClass(element, className) {
+  const ownClasses = String(element.className || "").split(/\s+/);
+  const matches = ownClasses.includes(className) ? [element] : [];
+  for (const child of element.children) {
+    matches.push(...findAllByClass(child, className));
+  }
+  return matches;
+}
+
 function createScheduler() {
   let nextId = 1;
   const timers = new Map();
@@ -1258,6 +1293,9 @@ class FakeElement {
       return this;
     }
     if (selector === "button[data-template-draft-id]" && this instanceof FakeButtonElement && this.dataset.templateDraftId) {
+      return this;
+    }
+    if (selector === "button[data-prompt-category]" && this instanceof FakeButtonElement && this.dataset.promptCategory) {
       return this;
     }
     if (selector === "[data-template-id]" && this.dataset.templateId) {

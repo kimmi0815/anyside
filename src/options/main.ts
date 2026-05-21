@@ -37,6 +37,7 @@ const customUrlList = element<HTMLElement>("customUrlList");
 const promptTemplateForm = element<HTMLFormElement>("promptTemplateForm");
 const promptTitleInput = element<HTMLInputElement>("promptTitleInput");
 const promptCategoryInput = element<HTMLInputElement>("promptCategoryInput");
+const promptCategoryOptions = element<HTMLDataListElement>("promptCategoryOptions");
 const promptBodyInput = element<HTMLTextAreaElement>("promptBodyInput");
 const promptSubmitButton = element<HTMLButtonElement>("promptSubmitButton");
 const promptTemplateList = element<HTMLElement>("promptTemplateList");
@@ -58,6 +59,7 @@ let customPromptTemplates: PromptTemplate[] = [];
 let statusTimer: number | undefined;
 const promptTemplateOperations = new Map<string, Promise<void>>();
 const deletedPromptTemplateIds = new Set<string>();
+const expandedPromptTemplateCategories = new Set<string>();
 
 void init();
 
@@ -156,6 +158,12 @@ function bindEvents(): void {
     if (!(target instanceof HTMLElement)) {
       return;
     }
+    const categoryToggle = target.closest<HTMLButtonElement>("button[data-prompt-category]");
+    if (categoryToggle?.dataset.promptCategory) {
+      togglePromptTemplateCategory(categoryToggle.dataset.promptCategory);
+      return;
+    }
+
     const button = target.closest<HTMLButtonElement>("button[data-delete-prompt-id]");
     if (button?.dataset.deletePromptId) {
       void removePromptTemplate(button.dataset.deletePromptId);
@@ -177,6 +185,7 @@ function bindEvents(): void {
 
     if (changes[CUSTOM_PROMPT_TEMPLATES_KEY]) {
       customPromptTemplates = normalizeCustomPromptTemplates(changes[CUSTOM_PROMPT_TEMPLATES_KEY].newValue);
+      renderPromptCategoryOptions();
       renderPromptTemplates();
     }
 
@@ -238,6 +247,7 @@ function render(): void {
   languageSelect.value = settings.language;
   renderQuickAccessServices();
   renderCustomUrls();
+  renderPromptCategoryOptions();
   renderPromptTemplates();
 }
 
@@ -344,9 +354,73 @@ function renderPromptTemplates(): void {
     return;
   }
 
-  for (const template of customPromptTemplates) {
-    promptTemplateList.append(promptTemplateEntry(template));
+  for (const group of groupPromptTemplatesByCategory(customPromptTemplates)) {
+    promptTemplateList.append(promptTemplateGroup(group.category, group.templates));
   }
+}
+
+function renderPromptCategoryOptions(): void {
+  promptCategoryOptions.textContent = "";
+  promptCategoryInput.setAttribute("list", "promptCategoryOptions");
+  for (const category of promptTemplateCategories()) {
+    const option = document.createElement("option");
+    option.value = category;
+    promptCategoryOptions.append(option);
+  }
+}
+
+function promptTemplateCategories(): string[] {
+  return [...new Set(customPromptTemplates.map((template) => template.category.trim()).filter(Boolean))];
+}
+
+function groupPromptTemplatesByCategory(templates: PromptTemplate[]): { category: string; templates: PromptTemplate[] }[] {
+  const groups = new Map<string, PromptTemplate[]>();
+  for (const template of templates) {
+    const category = template.category.trim() || tr("options.promptCategoryPlaceholder");
+    const existing = groups.get(category) ?? [];
+    existing.push(template);
+    groups.set(category, existing);
+  }
+  return [...groups.entries()].map(([category, groupedTemplates]) => ({ category, templates: groupedTemplates }));
+}
+
+function promptTemplateGroup(category: string, templates: PromptTemplate[]): HTMLElement {
+  const group = document.createElement("section");
+  group.className = "prompt-category-group";
+  group.dataset.promptCategoryGroup = category;
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "prompt-category-toggle";
+  toggle.dataset.promptCategory = category;
+  toggle.setAttribute("aria-expanded", expandedPromptTemplateCategories.has(category) ? "true" : "false");
+
+  const title = document.createElement("span");
+  title.className = "prompt-category-title";
+  title.textContent = category;
+
+  const count = document.createElement("span");
+  count.textContent = tr("options.promptCategoryCount", { count: templates.length });
+  toggle.append(title, count);
+
+  const items = document.createElement("div");
+  items.className = "prompt-category-items";
+  items.hidden = !expandedPromptTemplateCategories.has(category);
+  for (const template of templates) {
+    items.append(promptTemplateEntry(template));
+  }
+
+  group.append(toggle, items);
+  return group;
+}
+
+function togglePromptTemplateCategory(category: string): void {
+  if (expandedPromptTemplateCategories.has(category)) {
+    expandedPromptTemplateCategories.delete(category);
+  } else {
+    expandedPromptTemplateCategories.add(category);
+  }
+  renderPromptTemplates();
 }
 
 function customUrlEntry(customUrl: CustomUrl): HTMLElement {
@@ -399,16 +473,18 @@ function customUrlEntry(customUrl: CustomUrl): HTMLElement {
 
 function promptTemplateEntry(template: PromptTemplate): HTMLElement {
   const entry = document.createElement("div");
-  entry.className = "entry";
+  entry.className = "entry prompt-template-entry";
   entry.dataset.entryId = template.id;
 
   const head = document.createElement("div");
   head.className = "entry-head";
 
-  head.append(createEntryIcon(undefined, serviceInitial(template.title)));
-
   const fields = document.createElement("div");
   fields.className = "entry-fields";
+
+  if (template.category) {
+    fields.append(entryTag(template.category));
+  }
 
   const titleInput = document.createElement("input");
   titleInput.className = "entry-input";
@@ -424,6 +500,7 @@ function promptTemplateEntry(template: PromptTemplate): HTMLElement {
   categoryInput.name = "category";
   categoryInput.value = template.category;
   categoryInput.placeholder = tr("options.promptCategory");
+  categoryInput.setAttribute("list", "promptCategoryOptions");
   categoryInput.setAttribute("aria-label", tr("options.promptCategoryInput"));
 
   fields.append(titleInput, categoryInput);
@@ -440,21 +517,22 @@ function promptTemplateEntry(template: PromptTemplate): HTMLElement {
   body.setAttribute("aria-label", tr("options.promptBody"));
   entry.append(body);
 
-  const foot = document.createElement("div");
-  foot.className = "entry-foot";
-  if (template.category) {
-    const tag = document.createElement("span");
-    tag.className = "entry-tag";
-    tag.textContent = template.category;
-    foot.append(tag);
-  }
   const status = document.createElement("span");
   status.className = "entry-status";
   status.dataset.role = "status";
+  const foot = document.createElement("div");
+  foot.className = "entry-foot";
   foot.append(status);
   entry.append(foot);
 
   return entry;
+}
+
+function entryTag(label: string): HTMLElement {
+  const tag = document.createElement("span");
+  tag.className = "entry-tag";
+  tag.textContent = label;
+  return tag;
 }
 
 function entryActions(id: string, datasetKey: "deleteId" | "deletePromptId", removeLabel: string): HTMLElement {

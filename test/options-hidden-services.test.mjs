@@ -4,26 +4,7 @@ import { test } from "node:test";
 test("options toggles quick access services in the side panel header", async () => {
   const document = createOptionsDocument();
   const storageData = {
-    "anyside.settings": {
-      defaultPresetId: "chatgpt",
-      activePresetId: "chatgpt",
-      customUrls: [],
-      serviceOrder: ["chatgpt", "gemini", "claude", "perplexity", "notebooklm", "grok"],
-      hiddenServiceIds: ["claude"],
-      quickAccessConfigured: true,
-      lastUrlByPreset: {
-        chatgpt: "https://chatgpt.com/",
-        gemini: "https://gemini.google.com/",
-        claude: "https://claude.ai/",
-        notebooklm: "https://notebooklm.google.com/",
-        perplexity: "https://www.perplexity.ai/",
-        grok: "https://grok.com/",
-        custom: ""
-      },
-      enableFrameHeaderRelaxation: false,
-      frameHeaderRelaxationAcknowledged: false,
-      diagnostics: {}
-    }
+    "anyside.settings": createSettings({ hiddenServiceIds: ["claude"] })
   };
 
   globalThis.HTMLElement = FakeElement;
@@ -72,12 +53,99 @@ test("options toggles quick access services in the side panel header", async () 
   }
 });
 
+test("options renders custom prompt templates under category groups", async () => {
+  const document = createOptionsDocument();
+  const storageData = {
+    "anyside.settings": createSettings(),
+    "composer.promptTemplates": [
+      {
+        id: "custom:research-a",
+        title: "A",
+        category: "Research",
+        body: "A body",
+        favorite: true,
+        createdAt: 1,
+        updatedAt: 1
+      },
+      {
+        id: "custom:research-b",
+        title: "B",
+        category: "Research",
+        body: "B body",
+        favorite: true,
+        createdAt: 2,
+        updatedAt: 2
+      },
+      {
+        id: "custom:writing-c",
+        title: "C",
+        category: "Writing",
+        body: "C body",
+        favorite: true,
+        createdAt: 3,
+        updatedAt: 3
+      }
+    ]
+  };
+
+  globalThis.HTMLElement = FakeElement;
+  globalThis.HTMLButtonElement = FakeButtonElement;
+  globalThis.HTMLFormElement = FakeFormElement;
+  globalThis.HTMLInputElement = FakeInputElement;
+  globalThis.HTMLImageElement = FakeImageElement;
+  globalThis.document = document;
+  globalThis.chrome = createChromeMock(storageData);
+  globalThis.IntersectionObserver = class {
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+  };
+
+  try {
+    await import(`../dist/options/main.js?prompt-groups-${Date.now()}`);
+    await flushAsync();
+
+    const groups = findAllByClass(document.getElementById("promptTemplateList"), "prompt-category-group");
+    assert.equal(groups.length, 2);
+    assert.match(textTree(groups[0]), /Research/);
+    assert.match(textTree(groups[0]), /2 prompts/);
+    assert.equal(findAllByClass(groups[0], "prompt-category-items")[0].hidden, true);
+    const categoryToggle = findByDataset(groups[0], "promptCategory", "Research");
+    document.getElementById("promptTemplateList").dispatch("click", { target: categoryToggle });
+    assert.equal(findAllByClass(document.getElementById("promptTemplateList"), "prompt-category-items")[0].hidden, false);
+
+    const categoryOptions = document.getElementById("promptCategoryOptions");
+    assert.deepEqual(categoryOptions.children.map((option) => option.value), ["Research", "Writing"]);
+    assert.equal(document.getElementById("promptCategoryInput").attributes["list"], "promptCategoryOptions");
+
+    const expandedGroups = findAllByClass(document.getElementById("promptTemplateList"), "prompt-category-group");
+    assert.equal(findAllByClass(groups[0], "entry").length, 2);
+    assert.match(textTree(expandedGroups[1]), /Writing/);
+    assert.equal(findAllByClass(expandedGroups[1], "entry").length, 1);
+    assert.equal(findAllByClass(expandedGroups[0], "entry-icon").length, 0);
+    assert.equal(findAllByClass(expandedGroups[1], "entry-icon").length, 0);
+    assert.equal(findByDataset(expandedGroups[0], "entryId", "custom:research-a")?.dataset.entryId, "custom:research-a");
+    assert.equal(findByDataset(expandedGroups[0], "entryId", "custom:research-b")?.dataset.entryId, "custom:research-b");
+    assert.equal(findByDataset(expandedGroups[1], "entryId", "custom:writing-c")?.dataset.entryId, "custom:writing-c");
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.document;
+    delete globalThis.HTMLElement;
+    delete globalThis.HTMLButtonElement;
+    delete globalThis.HTMLFormElement;
+    delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLImageElement;
+    delete globalThis.IntersectionObserver;
+  }
+});
+
 function createOptionsDocument() {
   const document = new FakeDocument();
   for (const id of [
     "hiddenServiceList",
     "customUrlList",
     "promptTemplateList",
+    "promptCategoryOptions",
     "statusText",
     "aboutVersion"
   ]) {
@@ -127,6 +195,30 @@ function createChromeMock(storageData) {
   };
 }
 
+function createSettings(overrides = {}) {
+  return {
+    defaultPresetId: "chatgpt",
+    activePresetId: "chatgpt",
+    customUrls: [],
+    serviceOrder: ["chatgpt", "gemini", "claude", "perplexity", "notebooklm", "grok"],
+    hiddenServiceIds: [],
+    quickAccessConfigured: true,
+    lastUrlByPreset: {
+      chatgpt: "https://chatgpt.com/",
+      gemini: "https://gemini.google.com/",
+      claude: "https://claude.ai/",
+      notebooklm: "https://notebooklm.google.com/",
+      perplexity: "https://www.perplexity.ai/",
+      grok: "https://grok.com/",
+      custom: ""
+    },
+    enableFrameHeaderRelaxation: false,
+    frameHeaderRelaxationAcknowledged: false,
+    diagnostics: {},
+    ...overrides
+  };
+}
+
 function textTree(element) {
   return [
     element.textContent,
@@ -145,6 +237,15 @@ function findByDataset(element, key, value) {
     }
   }
   return null;
+}
+
+function findAllByClass(element, className) {
+  const ownClasses = String(element.className || "").split(/\s+/);
+  const matches = ownClasses.includes(className) ? [element] : [];
+  for (const child of element.children) {
+    matches.push(...findAllByClass(child, className));
+  }
+  return matches;
 }
 
 class FakeDocument {
@@ -173,6 +274,10 @@ class FakeDocument {
       return new FakeInputElement("", this);
     }
     return new FakeElement("", this);
+  }
+
+  createElementNS(_namespace, tagName) {
+    return this.createElement(tagName);
   }
 }
 
@@ -222,6 +327,22 @@ class FakeElement {
 
   setAttribute(name, value) {
     this.attributes[name] = String(value);
+  }
+
+  closest(selector) {
+    if (selector === "button[data-prompt-category]" && this instanceof FakeButtonElement && this.dataset.promptCategory) {
+      return this;
+    }
+    if (selector === "button[data-delete-prompt-id]" && this instanceof FakeButtonElement && this.dataset.deletePromptId) {
+      return this;
+    }
+    if (selector === "button[data-delete-id]" && this instanceof FakeButtonElement && this.dataset.deleteId) {
+      return this;
+    }
+    if (selector === ".entry" && this.className?.split?.(/\s+/).includes("entry")) {
+      return this;
+    }
+    return this.parentElement?.closest?.(selector) ?? null;
   }
 
   focus() {}
