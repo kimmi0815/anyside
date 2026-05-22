@@ -6,7 +6,7 @@ import {
   deleteCustomPromptTemplate,
   getCustomPromptTemplates,
   normalizeCustomPromptTemplates,
-  updateCustomPromptTemplate
+  updateCustomPromptTemplatePatch
 } from "../storage/promptTemplateStorage.js";
 import type { PromptTemplate } from "../features/composer/types.js";
 import type { ActivePresetId, CustomUrl, PresetId, Settings } from "../shared/types.js";
@@ -876,12 +876,7 @@ async function handlePromptTemplateBlur(
       if (deletedPromptTemplateIds.has(id)) {
         return;
       }
-      customPromptTemplates = await updateCustomPromptTemplate(id, {
-        title: value,
-        category: template.category,
-        body: template.body,
-        favorite: template.favorite
-      });
+      customPromptTemplates = await updateCustomPromptTemplatePatch(id, { title: value });
       showEntryStatus(entry, tr("common.saved"), "saved");
     });
     return;
@@ -895,12 +890,7 @@ async function handlePromptTemplateBlur(
       if (deletedPromptTemplateIds.has(id)) {
         return;
       }
-      customPromptTemplates = await updateCustomPromptTemplate(id, {
-        title: template.title,
-        category: value,
-        body: template.body,
-        favorite: template.favorite
-      });
+      customPromptTemplates = await updateCustomPromptTemplatePatch(id, { category: value });
       const destinationKey = value || UNCATEGORIZED_CATEGORY_KEY;
       collapsedPromptTemplateCategories.delete(destinationKey);
       showEntryStatus(entry, tr("common.saved"), "saved");
@@ -925,12 +915,7 @@ async function handlePromptTemplateBlur(
       if (deletedPromptTemplateIds.has(id)) {
         return;
       }
-      customPromptTemplates = await updateCustomPromptTemplate(id, {
-        title: template.title,
-        category: template.category,
-        body: value,
-        favorite: template.favorite
-      });
+      customPromptTemplates = await updateCustomPromptTemplatePatch(id, { body: value });
       showEntryStatus(entry, tr("common.saved"), "saved");
     });
   }

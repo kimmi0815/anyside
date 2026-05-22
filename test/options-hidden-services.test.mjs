@@ -167,6 +167,73 @@ test("options renders custom prompt templates under category groups", async () =
   }
 });
 
+test("options rapid prompt template field blurs preserve every edited field", async () => {
+  const document = createOptionsDocument();
+  const storageData = {
+    "anyside.settings": createSettings(),
+    "composer.promptTemplates": [
+      {
+        id: "custom:rapid",
+        title: "Original title",
+        category: "Original category",
+        body: "Original body",
+        favorite: true,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ]
+  };
+
+  globalThis.HTMLElement = FakeElement;
+  globalThis.HTMLButtonElement = FakeButtonElement;
+  globalThis.HTMLFormElement = FakeFormElement;
+  globalThis.HTMLInputElement = FakeInputElement;
+  globalThis.HTMLImageElement = FakeImageElement;
+  globalThis.document = document;
+  globalThis.chrome = createChromeMock(storageData);
+  globalThis.IntersectionObserver = class {
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+  };
+
+  try {
+    await import(`../dist/options/main.js?prompt-rapid-blur-${Date.now()}`);
+    await flushAsync();
+
+    const list = document.getElementById("promptTemplateList");
+    const entry = findByDataset(list, "entryId", "custom:rapid");
+    const titleInput = findByName(entry, "title");
+    const categoryInput = findByName(entry, "category");
+    const bodyInput = findByName(entry, "body");
+
+    titleInput.value = "Updated title";
+    list.dispatch("focusout", { target: titleInput });
+    bodyInput.value = "Updated body";
+    list.dispatch("focusout", { target: bodyInput });
+    categoryInput.value = "Updated category";
+    list.dispatch("focusout", { target: categoryInput });
+
+    await flushAsync();
+    await flushAsync();
+
+    const [template] = storageData["composer.promptTemplates"];
+    assert.equal(template.title, "Updated title");
+    assert.equal(template.category, "Updated category");
+    assert.equal(template.body, "Updated body");
+    assert.equal(template.favorite, true);
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.document;
+    delete globalThis.HTMLElement;
+    delete globalThis.HTMLButtonElement;
+    delete globalThis.HTMLFormElement;
+    delete globalThis.HTMLInputElement;
+    delete globalThis.HTMLImageElement;
+    delete globalThis.IntersectionObserver;
+  }
+});
+
 test("options refreshes category combobox labels after language changes", async () => {
   const document = createOptionsDocument();
   const storageData = {
@@ -321,9 +388,25 @@ function findAllByClass(element, className) {
   return matches;
 }
 
+function findByName(element, name) {
+  if (element.name === name) {
+    return element;
+  }
+  for (const child of element.children) {
+    const found = findByName(child, name);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
 function matchesSelector(element, selector) {
   if (selector === "[data-category-combobox-chevron]") {
     return Boolean(element.dataset?.categoryComboboxChevron);
+  }
+  if (selector === "[data-role='status']") {
+    return element.dataset?.role === "status";
   }
   return false;
 }
@@ -394,6 +477,33 @@ class FakeElement {
     this.id = id;
     this.ownerDocument = ownerDocument;
     this._textContent = "";
+    this.classList = {
+      add: (...classes) => {
+        const next = new Set(String(this.className || "").split(/\s+/).filter(Boolean));
+        for (const className of classes.filter(Boolean)) {
+          next.add(className);
+        }
+        this.className = [...next].join(" ");
+      },
+      remove: (...classes) => {
+        const removeSet = new Set(classes);
+        this.className = String(this.className || "")
+          .split(/\s+/)
+          .filter((className) => className && !removeSet.has(className))
+          .join(" ");
+      },
+      toggle: (className, force) => {
+        const classes = new Set(String(this.className || "").split(/\s+/).filter(Boolean));
+        const shouldAdd = force ?? !classes.has(className);
+        if (shouldAdd) {
+          classes.add(className);
+        } else {
+          classes.delete(className);
+        }
+        this.className = [...classes].join(" ");
+        return shouldAdd;
+      }
+    };
   }
 
   get textContent() {
@@ -451,6 +561,19 @@ class FakeElement {
       return this;
     }
     return this.parentElement?.closest?.(selector) ?? null;
+  }
+
+  querySelector(selector) {
+    for (const child of this.children) {
+      if (matchesSelector(child, selector)) {
+        return child;
+      }
+      const found = child.querySelector?.(selector);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
   }
 
   focus() {}

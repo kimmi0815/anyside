@@ -7,7 +7,8 @@ import {
   deleteCustomPromptTemplate,
   getCustomPromptTemplates,
   normalizeCustomPromptTemplates,
-  updateCustomPromptTemplate
+  updateCustomPromptTemplate,
+  updateCustomPromptTemplatePatch
 } from "../dist/storage/promptTemplateStorage.js";
 
 test("normalizeCustomPromptTemplates keeps only valid custom prompts", () => {
@@ -26,6 +27,48 @@ test("normalizeCustomPromptTemplates keeps only valid custom prompts", () => {
   assert.equal(normalized[1].title, "My Prompt");
   assert.equal(normalized[1].body, "Body");
   assert.equal(normalized[1].favorite, false);
+});
+
+test("custom prompt patch updates preserve fields changed by adjacent saves", async () => {
+  const storageData = {
+    [CUSTOM_PROMPT_TEMPLATES_KEY]: [
+      {
+        id: "custom:rapid",
+        title: "Original title",
+        category: "Original category",
+        body: "Original body",
+        favorite: true,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ]
+  };
+  globalThis.chrome = {
+    storage: {
+      local: {
+        async get(keys) {
+          const keyList = Array.isArray(keys) ? keys : [keys];
+          return Object.fromEntries(keyList.map((key) => [key, storageData[key]]));
+        },
+        async set(values) {
+          Object.assign(storageData, values);
+        }
+      }
+    }
+  };
+
+  try {
+    await updateCustomPromptTemplatePatch("custom:rapid", { title: "Updated title" });
+    await updateCustomPromptTemplatePatch("custom:rapid", { body: "Updated body" });
+    const templates = await updateCustomPromptTemplatePatch("custom:rapid", { category: "Updated category", favorite: false });
+
+    assert.equal(templates[0].title, "Updated title");
+    assert.equal(templates[0].category, "Updated category");
+    assert.equal(templates[0].body, "Updated body");
+    assert.equal(templates[0].favorite, false);
+  } finally {
+    delete globalThis.chrome;
+  }
 });
 
 test("custom prompt storage adds, updates, and deletes templates", async () => {

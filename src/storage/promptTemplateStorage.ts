@@ -10,6 +10,13 @@ type PromptTemplateInput = {
   favorite?: boolean;
 };
 
+type PromptTemplatePatch = {
+  title?: string;
+  category?: string;
+  body?: string;
+  favorite?: boolean;
+};
+
 export async function getCustomPromptTemplates(): Promise<PromptTemplate[]> {
   const stored = await chrome.storage.local.get([CUSTOM_PROMPT_TEMPLATES_KEY]);
   return normalizeCustomPromptTemplates(stored[CUSTOM_PROMPT_TEMPLATES_KEY]);
@@ -37,18 +44,23 @@ export async function addCustomPromptTemplate(input: PromptTemplateInput): Promi
 }
 
 export async function updateCustomPromptTemplate(id: string, input: PromptTemplateInput): Promise<PromptTemplate[]> {
+  return updateCustomPromptTemplatePatch(id, input);
+}
+
+export async function updateCustomPromptTemplatePatch(id: string, input: PromptTemplatePatch): Promise<PromptTemplate[]> {
   const templates = await getCustomPromptTemplates();
   const index = templates.findIndex((template) => template.id === id);
   if (index === -1) {
     return templates;
   }
 
+  const current = templates[index];
   templates[index] = {
-    ...templates[index],
-    title: input.title.trim(),
-    category: normalizeCategory(input.category),
-    body: input.body.trim(),
-    favorite: input.favorite ?? templates[index].favorite,
+    ...current,
+    title: input.title === undefined ? current.title : input.title.trim(),
+    category: input.category === undefined ? current.category : normalizeCategory(input.category),
+    body: input.body === undefined ? current.body : input.body.trim(),
+    favorite: input.favorite ?? current.favorite,
     updatedAt: Date.now()
   };
   return saveCustomPromptTemplates(templates);

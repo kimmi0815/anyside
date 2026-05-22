@@ -5,10 +5,10 @@ Use this checklist before public release and whenever `manifest.json` changes.
 ## Permission Justification
 
 - `activeTab`: Reads the currently active tab title, URL, and selection after an explicit user action for Context and Prompt actions.
-- `clipboardWrite`: Copies generated prompt text to the clipboard after user action or when AI-page insertion is unavailable.
+- `clipboardWrite`: Copies generated prompt text to the clipboard after user action or when AI-page insertion is unavailable, and allows delegated `clipboard-write` for the embedded AI iframe.
 - `contextMenus`: Adds selected-text context menu actions for asking anyside about a selection or adding the selection to the session-only Context Shelf.
-- `declarativeNetRequest`: Supports short-lived iframe compatibility session rules for built-in AI-service subframes.
-- `declarativeNetRequestWithHostAccess`: Allows frame compatibility session rules to apply to the declared built-in AI-service hosts.
+- `declarativeNetRequest`: Supports short-lived iframe compatibility session rules that remove `x-frame-options` and `content-security-policy` response headers for built-in AI-service subframes.
+- `declarativeNetRequestWithHostAccess`: Allows the scoped frame compatibility session rules to apply only to the declared built-in AI-service hosts.
 - `offscreen`: Creates the extension offscreen document used for reliable clipboard writes.
 - `scripting`: Injects short user-action clipboard helpers and communicates with AI input agents on supported pages.
 - `sidePanel`: Opens and manages the Chrome Side Panel experience.
@@ -44,9 +44,10 @@ The extension intentionally does not request the persistent `tabs` permission. I
 
 - Persistent local Chrome extension storage holds: settings, custom URLs, diagnostics, service order, quick access visibility, and prompt templates. Context Shelf items, Prompt Draft text, the Prompt Draft target service, and pending context-menu Shelf selections live in `chrome.storage.session` and are cleared when the browser session ends.
 - Active tab context is temporary and requested only after user action.
-- Clipboard writes are user-action driven or fallback behavior.
+- Explicitly body-aware Context and Prompt actions can extract page headings and page text only after the user selects that action or template.
+- Clipboard writes are user-action driven or fallback behavior. The embedded AI iframe receives delegated `clipboard-write` permission only; `clipboard-read` is not delegated and the extension does not request `clipboardRead`.
 - Custom URL favicon discovery omits credentials for extension fetches.
 - AI-service prompt insertion fills the visible AI input field and does not auto-submit.
 - anyside has no backend server of its own.
-- DNR iframe compatibility uses short-lived session rules and is limited to built-in AI-service subframes loaded by the extension Side Panel.
+- DNR iframe compatibility uses short-lived session rules and is limited to built-in AI-service subframes loaded by the extension Side Panel. It does not apply to `main_frame` browsing or arbitrary Custom URL domains, the packaged static ruleset remains disabled, and failures leave the broad static ruleset disabled.
 - Users can reset extension settings from Options or delete all stored extension data by uninstalling the extension.
