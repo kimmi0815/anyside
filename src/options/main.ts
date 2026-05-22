@@ -301,6 +301,10 @@ function tr(key: string, params?: Parameters<typeof t>[2]): string {
   return t(uiLanguage, key as Parameters<typeof t>[1], params);
 }
 
+function confirmAction(message: string): boolean {
+  return typeof confirm === "function" ? confirm(message) : true;
+}
+
 function renderQuickAccessServices(): void {
   hiddenServiceList.textContent = "";
 
@@ -1014,6 +1018,10 @@ async function addCustomUrl(): Promise<void> {
 }
 
 async function deleteCustomUrl(id: string): Promise<void> {
+  if (!confirmAction(tr("options.confirmRemoveUrl"))) {
+    return;
+  }
+
   const presetId = makeCustomPresetId(id);
   settings.customUrls = settings.customUrls.filter((customUrl) => customUrl.id !== id);
   delete settings.lastUrlByPreset[presetId];
@@ -1056,6 +1064,10 @@ async function addPromptTemplate(): Promise<void> {
 }
 
 async function removePromptTemplate(id: string): Promise<void> {
+  if (!confirmAction(tr("options.confirmRemovePrompt"))) {
+    return;
+  }
+
   deletedPromptTemplateIds.add(id);
   await queuePromptTemplateOperation(id, async () => {
     customPromptTemplates = await deleteCustomPromptTemplate(id);
@@ -1065,6 +1077,10 @@ async function removePromptTemplate(id: string): Promise<void> {
 }
 
 async function resetSettings(): Promise<void> {
+  if (!confirmAction(tr("options.confirmReset"))) {
+    return;
+  }
+
   const defaults = defaultSettings();
   resetSettingsButton.disabled = true;
 

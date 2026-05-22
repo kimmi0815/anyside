@@ -13,9 +13,8 @@ Use this checklist before public release and whenever `manifest.json` changes.
 - `scripting`: Injects short user-action clipboard helpers and communicates with AI input agents on supported pages.
 - `sidePanel`: Opens and manages the Chrome Side Panel experience.
 - `storage`: Stores local extension settings, custom URLs, quick access visibility, service order, diagnostics, and prompt templates.
-- `windows`: Creates or reuses the side-window fallback when iframe loading or login is unreliable.
 
-The extension intentionally does not request the persistent `tabs` permission. It still uses the `chrome.tabs` API for operations allowed by `activeTab`, user gestures, or APIs that do not require the `tabs` permission.
+The extension intentionally does not request the persistent `tabs` permission. It still uses the `chrome.tabs` API for operations allowed by `activeTab`, user gestures, or APIs that do not require the `tabs` permission. The `chrome.windows` API used for the side-window fallback does not require a manifest permission.
 
 ## Host Permission Justification
 

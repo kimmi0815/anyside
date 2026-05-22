@@ -82,6 +82,9 @@ const STRINGS = {
     "options.quickAccessHidden": "Service hidden from quick access.",
     "options.iconUpdated": "Icon updated",
     "options.languageUpdated": "Language updated.",
+    "options.confirmReset": "Reset all settings to defaults? Custom URLs and quick-access changes cannot be undone.",
+    "options.confirmRemoveUrl": "Remove this custom URL?",
+    "options.confirmRemovePrompt": "Remove this prompt?",
 
     "side.loadingInitial": "Loading anyside...",
     "side.aiServices": "AI services",
@@ -301,6 +304,9 @@ const STRINGS = {
     "options.quickAccessHidden": "サービスをクイックアクセスから非表示にしました。",
     "options.iconUpdated": "アイコンを更新しました",
     "options.languageUpdated": "言語を更新しました。",
+    "options.confirmReset": "設定を初期状態に戻しますか？Custom URLやクイックアクセスの変更は元に戻せません。",
+    "options.confirmRemoveUrl": "このCustom URLを削除しますか？",
+    "options.confirmRemovePrompt": "このPromptを削除しますか？",
 
     "side.loadingInitial": "anysideを読み込み中...",
     "side.aiServices": "AIサービス",

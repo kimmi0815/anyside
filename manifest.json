@@ -28,8 +28,7 @@
     "offscreen",
     "scripting",
     "sidePanel",
-    "storage",
-    "windows"
+    "storage"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",
