@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "description": "A Manifest V3 Chrome extension that keeps AI services in the Chrome Side Panel.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kimmi0815/anyside.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kimmi0815/anyside/issues"
+  },
+  "homepage": "https://github.com/kimmi0815/anyside#readme",
   "engines": {
     "node": ">=20.19"
   },
