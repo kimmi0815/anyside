@@ -119,6 +119,10 @@ For the public privacy summary, see [`PRIVACY.md`](PRIVACY.md). For release perm
 - The context menu can create a prompt and copy it to your clipboard, or add the current selection to the session-only Context Shelf, after a user action.
 - The embedded iframe receives delegated `clipboard-write` permission so AI page copy buttons can work. It does not receive delegated `clipboard-read` permission. Extension-initiated clipboard writes use the extension/offscreen helper instead.
 
+## License
+
+anyside is open source under the [MIT License](LICENSE).
+
 ## Files
 
 - `manifest.json`
